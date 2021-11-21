@@ -10,25 +10,25 @@ import (
 type PackageComplier struct {
 	ctx        build.Context
 	importPath string
-	compliants map[string]*PackageComplation // packageComplation.importPath -> packageComplation
+	compliants map[string]*PackageCompilation // packageComplation.importPath -> packageComplation
 }
 
 func NewPackageComplier(ctx build.Context, importPath string) *PackageComplier {
 	return &PackageComplier{
 		ctx:        ctx,
 		importPath: importPath,
-		compliants: make(map[string]*PackageComplation),
+		compliants: make(map[string]*PackageCompilation),
 	}
 }
 
-func (pc *PackageComplier) Compile() (*PackageComplation, error) {
+func (pc *PackageComplier) Compile() (*PackageCompilation, error) {
 	// import all build packages under the import path
 	if err := pc.Import(); err != nil {
 		return nil, err
 	}
 
 	// exclude depend only pkg
-	var compliant *PackageComplation
+	var compliant *PackageCompilation
 	for _, unit := range pc.compliants {
 		if unit.DepOnly {
 			continue
@@ -60,14 +60,14 @@ func (pc *PackageComplier) Import() error {
 		importPath := pkg.ImportPath
 		_, ok := pc.compliants[importPath]
 		if !ok {
-			pc.compliants[pkg.ImportPath] = NewPackageComplation(pkg.buildPackage(), pkg.DepOnly, pc.findDependComplation)
+			pc.compliants[pkg.ImportPath] = NewPackageCompilation(pkg.buildPackage(), pkg.DepOnly, pc.findDependComplation)
 		}
 	}
 
 	return nil
 }
 
-func (pc *PackageComplier) findDependComplation(importPath string, pkgBaseDir string) (*PackageComplation, error) {
+func (pc *PackageComplier) findDependComplation(importPath string, pkgBaseDir string) (*PackageCompilation, error) {
 	if unit := pc.compliants[importPath]; unit != nil {
 		return unit.Clone(), nil
 	}
@@ -78,7 +78,7 @@ func (pc *PackageComplier) findDependComplation(importPath string, pkgBaseDir st
 		return nil, err
 	}
 
-	unit := NewPackageComplation(bp, true, pc.findDependComplation)
+	unit := NewPackageCompilation(bp, true, pc.findDependComplation)
 	pc.compliants[bp.ImportPath] = unit
 
 	return unit.Clone(), nil

@@ -48,77 +48,94 @@ func (w *astVisitor) parent(i int) ast.Node {
 	return w.stack[len(w.stack)-1-i]
 }
 
-func (pcu *PackageComplation) isLog(id *ast.BasicLit, stack stackFunc) {
+type AstAnalyzer struct {
+	Package   *types.Package
+	TypesInfo *types.Info
+
+	// todo: lock
+	Functions    map[ast.Node]string
+	PackageInits map[*ast.File]string
+}
+
+func NewAstAnalyzer() *AstAnalyzer {
+	return &AstAnalyzer{
+		TypesInfo:    NewTypeInfo(),
+		Functions:    make(map[ast.Node]string),
+		PackageInits: make(map[*ast.File]string),
+	}
+}
+
+func (ai *AstAnalyzer) isLog(id *ast.BasicLit, stack stackFunc) {
 	//	log.Printf("stack %d, item %+v", i, stack(i))
 	switch p := stack(1).(type) {
 	case *ast.Ident, *ast.SelectorExpr:
 		//log.Printf("stack %d, item %+v", i, p)
 	case *ast.CallExpr:
 		if pp, ok := p.Fun.(*ast.SelectorExpr); ok {
-			pcu.filterLog(id, pp.Sel, stack)
+			ai.filterLog(id, pp.Sel, stack)
 			//log.Printf("basiclist%+v stack %+v", id, p)
 		}
 	}
 }
 
-func (pcu *PackageComplation) filterLog(x *ast.BasicLit, id *ast.Ident, stack stackFunc) {
-	obj := pcu.TypesInfo.Uses[id]
+func (ai *AstAnalyzer) filterLog(x *ast.BasicLit, id *ast.Ident, stack stackFunc) {
+	obj := ai.TypesInfo.Uses[id]
 	if obj == nil {
 		// Defining identifiers are handled by their parent nodes.
 		return
 	}
 
 	if _, ok := isCall(id, obj, stack); ok {
-		callName := pcu.callContext(stack)
+		callName := ai.callContext(stack)
 		fnName := obj.Name()
 		fnPkg := obj.Pkg().Name()
 		//log.Printf("^^^^^^^^^^^^^function %s.%s, is in %s", fnPkg, fnName, callName)
 
 		if (fnPkg == "log") && (fnName == "Print" || fnName == "Printf") {
-			posInfo := pcu.FileSet.Position(id.Pos())
-			log.Printf("***************%s log %s, belong to function %s", posInfo, x.Value, callName)
+			//posInfo := fset.Position(id.Pos())
+			log.Printf("***************%d log %s, belong to function %s", id.Pos(), x.Value, callName)
 		}
 	}
 }
 
 // visitFuncDecl handles function and method declarations and their parameters.
-func (pcu *PackageComplation) visitFuncDecl(decl *ast.FuncDecl, stack stackFunc) {
+func (ai *AstAnalyzer) visitFuncDecl(decl *ast.FuncDecl, stack stackFunc) {
 	// Get the type of this function, even if its name is blank.
-	obj, _ := pcu.TypesInfo.Defs[decl.Name].(*types.Func)
+	obj, _ := ai.TypesInfo.Defs[decl.Name].(*types.Func)
 	if obj == nil {
 		return // a redefinition, for example
 	}
-	pcu.functions[decl] = decl.Name.Name
+	ai.Functions[decl] = decl.Name.Name
 }
 
 // visitFuncLit handles function literals and their parameters.  The signature
 // for a function literal is named relative to the signature of its parent
 // function, or the file scope if the literal is at the top level.
-func (pcu *PackageComplation) visitFuncLit(flit *ast.FuncLit, stack stackFunc) {
-	fi := pcu.callContext(stack)
+func (ai *AstAnalyzer) visitFuncLit(flit *ast.FuncLit, stack stackFunc) {
+	fi := ai.callContext(stack)
 	if fi == "" {
 		log.Fatalf("Function literal without a context: ", flit)
 	}
-	pcu.functions[flit] = fi
+	ai.Functions[flit] = fi
 }
 
 // callContext returns funcInfo for the nearest enclosing parent function, not
 // including the node itself, or the enclosing package initializer if the node
 // is at the top level.
-func (pcu *PackageComplation) callContext(stack stackFunc) string {
+func (ai *AstAnalyzer) callContext(stack stackFunc) string {
 	for i := 1; ; i++ {
 		switch p := stack(i).(type) {
 		case *ast.FuncDecl, *ast.FuncLit:
-			return pcu.functions[p]
+			return ai.Functions[p]
 		case *ast.File:
-			fi := pcu.packageInits[p]
+			fi := ai.PackageInits[p]
 			if fi == "" {
 				// Lazily emit a virtual node to represent the static
 				// initializer for top-level expressions in this file of the
 				// package.  We only do this if there are expressions that need
 				// to be initialized.
-				fi = fmt.Sprintf("<init>@%d", p.Package)
-				pcu.packageInits[p] = fi
+				fi = fmt.Sprintf("<init>@%d", ai.Package)
+				ai.PackageInits[p] = fi
 			}
 			return fi
 		}

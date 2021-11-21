@@ -17,35 +17,28 @@ import (
 	"golang.org/x/tools/go/gcexportdata"
 )
 
-type PackageComplation struct {
-	ctx              build.Context
-	Name             proto_common.XVName
-	Repo             *util.RepoPath
-	ImportPath       string
-	DepOnly          bool
-	BuiledPackage    *build.Package
-	SourceFiles      map[string]*FileInfo // file name => file info
-	Deps             map[string]*PackageComplation
-	Package          *types.Package
-	TypesInfo        *types.Info
-	Errors           []error
-	FileSet          *token.FileSet
-	HasCompileErrors bool
+type PackageCompilation struct {
+	ctx           build.Context
+	Name          proto_common.XVName
+	Repo          *util.RepoPath
+	ImportPath    string
+	DepOnly       bool
+	BuiledPackage *build.Package
+	SourceFiles   map[string]*FileInfo // file name => file info
+	Deps          map[string]*PackageCompilation
+	FileSet       map[string]*FileCompilation
 
-	files        []*ast.File
-	functions    map[ast.Node]string
-	packageInits map[*ast.File]string
-	dependFinder func(importPath string, pkgBaseDir string) (*PackageComplation, error)
+	dependFinder func(importPath string, pkgBaseDir string) (*PackageCompilation, error)
 }
 
-func NewPackageComplation(pkg *build.Package, depOnly bool, fn func(string, pkgBaseDir string) (*PackageComplation, error)) *PackageComplation {
-	unit := &PackageComplation{
+func NewPackageCompilation(pkg *build.Package, depOnly bool, fn func(string, pkgBaseDir string) (*PackageCompilation, error)) *PackageCompilation {
+	unit := &PackageCompilation{
 		ImportPath:    pkg.ImportPath,
 		Repo:          util.RepoForPackage(pkg),
 		DepOnly:       depOnly,
 		BuiledPackage: pkg,
 		SourceFiles:   make(map[string]*FileInfo),
-		Deps:          make(map[string]*PackageComplation),
+		Deps:          make(map[string]*PackageCompilation),
 		dependFinder:  fn,
 	}
 
@@ -54,8 +47,8 @@ func NewPackageComplation(pkg *build.Package, depOnly bool, fn func(string, pkgB
 	return unit
 }
 
-func (pcu *PackageComplation) Clone() *PackageComplation {
-	return &PackageComplation{
+func (pcu *PackageCompilation) Clone() *PackageCompilation {
+	return &PackageCompilation{
 		ImportPath: pcu.ImportPath,
 		Repo: &util.RepoPath{
 			Repo: pcu.Repo.Repo,
@@ -65,19 +58,18 @@ func (pcu *PackageComplation) Clone() *PackageComplation {
 		DepOnly:       pcu.DepOnly,
 		BuiledPackage: pcu.BuiledPackage,
 		SourceFiles:   make(map[string]*FileInfo),
-		Deps:          make(map[string]*PackageComplation),
+		Deps:          make(map[string]*PackageCompilation),
 		dependFinder:  pcu.dependFinder,
 	}
 }
 
-func (pcu *PackageComplation) Resolve() error {
+func (pcu *PackageCompilation) Resolve() error {
 	// add source files
 	pcu.addSourceFiles()
 	// add source deps
 	missing := pcu.addDeps()
 	if len(missing) != 0 {
-		pcu.HasCompileErrors = true
-		return &MissingError{pcu.ImportPath, missing}
+		return &CompileMissingError{pcu.ImportPath, missing}
 	}
 
 	fetcher, err := pcu.load()
@@ -85,26 +77,27 @@ func (pcu *PackageComplation) Resolve() error {
 		return err
 	}
 
-	err = pcu.link(fetcher)
+	err = pcu.compile(fetcher)
 	if err != nil {
 		return err
 	}
 
-	return pcu.analyze()
+	pcu.analyze()
+	return nil
 }
 
-func (pcu *PackageComplation) addSourceFiles() {
+func (pcu *PackageCompilation) addSourceFiles() {
 	baseDir := pcu.BuiledPackage.Dir
 	rootDir := pcu.BuiledPackage.Root
 	//log.Printf("add source files root %+v  base dir%+v files %+v", rootDir, baseDir, pcu.BuiledPackage.GoFiles)
 	for _, fileName := range pcu.BuiledPackage.GoFiles {
-		fi := NewFileInfo(rootDir, baseDir, fileName)
+		fi := NewFileInfo(rootDir, baseDir, fileName, pcu.Repo)
 		pcu.SourceFiles[fileName] = fi
 		//log.Printf("add source files root %+v  base dir%+v files %+v", rootDir, baseDir, fi)
 	}
 }
 
-func (pcu *PackageComplation) addDeps() []string {
+func (pcu *PackageCompilation) addDeps() []string {
 	baseDir := pcu.BuiledPackage.Dir
 	deps := pcu.BuiledPackage.Imports
 	var missing []string
@@ -116,7 +109,7 @@ func (pcu *PackageComplation) addDeps() []string {
 			missing = append(missing, depName)
 			log.Printf("miss deps base dir %+v depend import path %+v", baseDir, depName)
 		} else if _, ok := pcu.Deps[unit.ImportPath]; !ok {
-			unit.SourceFiles[unit.BuiledPackage.PkgObj] = NewFileInfo(unit.BuiledPackage.Root, "", unit.BuiledPackage.PkgObj)
+			unit.SourceFiles[unit.BuiledPackage.PkgObj] = NewFileInfo(unit.BuiledPackage.Root, "", unit.BuiledPackage.PkgObj, pcu.Repo)
 			pcu.Deps[unit.ImportPath] = unit
 			log.Printf("add dep root %s files %+v", depName, unit.SourceFiles[unit.BuiledPackage.PkgObj])
 		}
@@ -125,7 +118,7 @@ func (pcu *PackageComplation) addDeps() []string {
 	return missing
 }
 
-func (pcu *PackageComplation) load() (mapFetcher, error) {
+func (pcu *PackageCompilation) load() (mapFetcher, error) {
 	fetcher := make(mapFetcher)
 	//log.Printf("\n\n\n************** pkg %+v %+v", pcu.ImportPath, pcu.Repo)
 	// import path: github.com/IANTHEREAL/logutil/pkg/util repo: &{Repo:https://github.com/IANTHEREAL/logutil Root:github.com/IANTHEREAL/logutil Path:pkg/util}
@@ -178,10 +171,9 @@ func (pcu *PackageComplation) load() (mapFetcher, error) {
 	return fetcher, nil
 }
 
-func (pcu *PackageComplation) link(fetcher mapFetcher) error {
+func (pcu *PackageCompilation) compile(fetcher mapFetcher) error {
 	fset := token.NewFileSet()              // location info for the parser
-	smap := make(map[string]*ast.File)      // file path → file (sources)
-	srcData := make(map[*ast.File]string)   // file → text
+	astMap := make(map[*ast.File]*FileInfo) // ast file → file info
 	floc := make(map[*token.File]*ast.File) // file → ast
 	fmap := make(map[string]*FileInfo)      // import path → file info
 	deps := make(map[string]*types.Package) // :: import path → package
@@ -199,8 +191,7 @@ func (pcu *PackageComplation) link(fetcher mapFetcher) error {
 			return fmt.Errorf("parsing %q: %v", path, err)
 		}
 		astFiles = append(astFiles, parsed)
-		smap[path] = parsed
-		srcData[parsed] = string(data)
+		astMap[parsed] = fi
 	}
 
 	for _, dep := range pcu.Deps {
@@ -219,6 +210,10 @@ func (pcu *PackageComplation) link(fetcher mapFetcher) error {
 		return true
 	})
 
+	var (
+		err         error
+		compileErrs []error
+	)
 	pi := &packageImporter{
 		deps:    deps,
 		fileSet: fset,
@@ -229,41 +224,44 @@ func (pcu *PackageComplation) link(fetcher mapFetcher) error {
 		FakeImportC:              true, // so we can handle cgo
 		DisableUnusedImportCheck: true, // this is not fatal to type-checking
 		Importer:                 pi,
-		Error:                    func(err error) { pcu.Errors = append(pcu.Errors, err) },
+		Error:                    func(err error) { compileErrs = append(compileErrs, err) },
 	}
 
-	pcu.TypesInfo = NewTypeInfo()
-	pcu.files = astFiles
-	pcu.FileSet = fset
-	pcu.Package, _ = c.Check(astFiles[0].Name.Name, fset, astFiles, pcu.TypesInfo)
-	return nil
+	analyzer := &AstAnalyzer{
+		TypesInfo:    NewTypeInfo(),
+		Functions:    make(map[ast.Node]string),
+		PackageInits: make(map[*ast.File]string),
+	}
+	analyzer.Package, err = c.Check(astFiles[0].Name.Name, fset, astFiles, analyzer.TypesInfo)
+	for i, cerr := range compileErrs {
+		log.Printf("compiling package error %d -  %s", i, cerr)
+	}
+	if err != nil {
+		return err
+	}
+
+	pcu.FileSet = make(map[string]*FileCompilation)
+	for _, astFile := range astFiles {
+		fi := astMap[astFile]
+		if fi == nil {
+			return fmt.Errorf("not found file info for ast file %s", astFile.Name)
+		}
+		pcu.FileSet[fi.Digest] = &FileCompilation{
+			file:   fi,
+			fAst:   astFile,
+			fToken: fset,
+			ai:     analyzer,
+		}
+	}
+
+	return err
 }
 
-func (pcu *PackageComplation) analyze() error {
-	pcu.functions = make(map[ast.Node]string)
-	pcu.packageInits = make(map[*ast.File]string)
-
-	for _, astFile := range pcu.files {
-		ast.Walk(newASTVisitor(func(node ast.Node, stack stackFunc) bool {
-			switch n := node.(type) {
-			case *ast.Ident:
-			//pcu.visitIdent(n, stack)
-			case *ast.FuncDecl:
-				pcu.visitFuncDecl(n, stack)
-			case *ast.FuncLit:
-				pcu.visitFuncLit(n, stack)
-			case *ast.BasicLit:
-				pcu.isLog(n, stack)
-			}
-			return true
-		}), astFile)
+func (pcu *PackageCompilation) analyze() {
+	for name, fc := range pcu.FileSet {
+		log.Printf("ast name %s", name)
+		fc.Analyze()
 	}
-
-	for _, err := range pcu.Errors {
-		log.Printf("WARNING: Type resolution error: %v", err)
-	}
-
-	return nil
 }
 
 // packageImporter implements the types.Importer interface by fetching files
@@ -321,13 +319,13 @@ func (m mapFetcher) Fetch(_, digest string) ([]byte, error) {
 	return nil, os.ErrNotExist
 }
 
-// MissingError is the concrete type of errors about missing dependencies.
-type MissingError struct {
+// CompileMissingError is the concrete type of errors about missing dependencies.
+type CompileMissingError struct {
 	Path    string   // The import path of the incomplete package
 	Missing []string // The import paths of the missing dependencies
 }
 
-func (m *MissingError) Error() string {
+func (m *CompileMissingError) Error() string {
 	return fmt.Sprintf("package %q is missing %d imports (%s)",
 		m.Path, len(m.Missing), strings.Join(m.Missing, ", "))
 }

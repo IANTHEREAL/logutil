@@ -4,17 +4,22 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"go/ast"
+	"go/token"
 	"io"
 	"path/filepath"
 	"strings"
+
+	"github.com/IANTHEREAL/logutil/pkg/util"
 )
 
 type FileInfo struct {
+	Repo   *util.RepoPath
 	Path   string
 	Digest string
 }
 
-func NewFileInfo(rootDir, baseDir, file string) *FileInfo {
+func NewFileInfo(rootDir, baseDir, file string, repo *util.RepoPath) *FileInfo {
 	if !strings.HasSuffix(rootDir, "/") {
 		rootDir += "/"
 	}
@@ -26,7 +31,34 @@ func NewFileInfo(rootDir, baseDir, file string) *FileInfo {
 	return &FileInfo{
 		Path:   relativePath,
 		Digest: path,
+		Repo:   repo,
 	}
+}
+
+type FileCompilation struct {
+	file *FileInfo
+
+	fAst   *ast.File
+	fToken *token.FileSet
+
+	ai *AstAnalyzer
+}
+
+func (fc *FileCompilation) Analyze() {
+	ai := fc.ai
+	ast.Walk(newASTVisitor(func(node ast.Node, stack stackFunc) bool {
+		switch n := node.(type) {
+		case *ast.Ident:
+		//pcu.visitIdent(n, stack)
+		case *ast.FuncDecl:
+			ai.visitFuncDecl(n, stack)
+		case *ast.FuncLit:
+			ai.visitFuncLit(n, stack)
+		case *ast.BasicLit:
+			ai.isLog(n, stack)
+		}
+		return true
+	}), fc.fAst)
 }
 
 type FileData struct {
