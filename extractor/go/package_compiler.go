@@ -7,79 +7,84 @@ import (
 	"strings"
 )
 
-type PackageComplier struct {
-	ctx        build.Context
-	importPath string
-	compliants map[string]*PackageCompilation // packageComplation.importPath -> packageComplation
+// PackageCompiler helps to import package, and compile package to get AST set and type use info
+// usage:
+//  compiler := NewPackageComplier(build.Context)
+//  pkg, err := compiler.Compile(importPath)   // get compiled package
+//  or
+//  pkg, err := compiler.ImportPackage(import) // to get compiled package
+//  err = pkg.Compile()
+
+type PackageCompiler struct {
+	ctx            build.Context
+	compliantCache map[string]*PackageCompilation // packageComplation.importPath -> packageComplation
 }
 
-func NewPackageComplier(ctx build.Context, importPath string) *PackageComplier {
-	return &PackageComplier{
-		ctx:        ctx,
-		importPath: importPath,
-		compliants: make(map[string]*PackageCompilation),
+func NewPackageComplier(ctx build.Context) *PackageCompiler {
+	return &PackageCompiler{
+		ctx:            ctx,
+		compliantCache: make(map[string]*PackageCompilation),
 	}
 }
 
-func (pc *PackageComplier) Compile() (*PackageCompilation, error) {
+// Compile imports the package and compile it, return a compiled PackageCompilation
+func (pc *PackageCompiler) Compile(importPath string) (*PackageCompilation, error) {
 	// import all build packages under the import path
-	if err := pc.Import(); err != nil {
+	pkg, err := pc.ImportPackage(importPath)
+	if err != nil {
+		return nil, err
+	}
+	if pkg == nil {
+		return nil, fmt.Errorf("not found package(%s) to compile", importPath)
+	}
+
+	err = pkg.Compile()
+	return pkg, err
+}
+
+// ImportPackage imports the package and all dependency packages, return a uncompiled PackageCompilation
+func (pc *PackageCompiler) ImportPackage(importPath string) (*PackageCompilation, error) {
+	listedPackages, err := pc.listPackages(pc.ctx, importPath)
+	if err != nil {
 		return nil, err
 	}
 
-	// exclude depend only pkg
-	var compliant *PackageCompilation
-	for _, unit := range pc.compliants {
-		if unit.DepOnly {
-			continue
-		} else if compliant != nil {
-			return nil, fmt.Errorf("compling package: multiple packages %s and %s", unit.ImportPath, compliant.ImportPath)
-		}
-		compliant = unit
-	}
-
-	// resolve package compliation detail
-	err := compliant.Resolve()
-	return compliant, err
-}
-
-func (pc *PackageComplier) Import() error {
-	listedPackages, err := pc.listPackages(pc.ctx, pc.importPath)
-	if err != nil {
-		return err
-	}
-
 	for _, pkg := range listedPackages {
+		// ignore constructed test packages
 		if pkg.ForTest != "" || strings.HasSuffix(pkg.ImportPath, ".test") {
-			// ignore constructed test packages
 			continue
-		} else if pkg.Error != nil {
-			return pkg.Error
 		}
 
-		importPath := pkg.ImportPath
-		_, ok := pc.compliants[importPath]
+		if pkg.Error != nil {
+			return nil, pkg.Error
+		}
+
+		pkgImportPatch := pkg.ImportPath
+		_, ok := pc.compliantCache[pkgImportPatch]
 		if !ok {
-			pc.compliants[pkg.ImportPath] = NewPackageCompilation(pkg.buildPackage(), pkg.DepOnly, pc.findDependComplation)
+			pc.compliantCache[pkgImportPatch] = NewPackageCompilation(pkg.buildPackage(), pkg.DepOnly, pc.importDependPkg)
 		}
 	}
 
-	return nil
+	return pc.compliantCache[importPath], nil
 }
 
-func (pc *PackageComplier) findDependComplation(importPath string, pkgBaseDir string) (*PackageCompilation, error) {
-	if unit := pc.compliants[importPath]; unit != nil {
-		return unit.Clone(), nil
+// importDependPkg helps package compilation to import dependency package, return the packageCompilation(depend-only)
+func (pc *PackageCompiler) importDependPkg(importPath string, pkgBaseDir string) (*PackageCompilation, error) {
+	// firstly find in cache
+	if pkg := pc.compliantCache[importPath]; pkg != nil {
+		return pkg.Clone(), nil
 	}
 
-	bp, err := pc.ctx.Import(importPath, pkgBaseDir, build.AllowBinary)
+	// then try to import
+	bp, err := pc.ctx.Import("github.com/IANTHEREAL/logutil/pkg/util", pkgBaseDir, build.AllowBinary)
 	if err != nil {
 		log.Printf("import %v", err)
 		return nil, err
 	}
 
-	unit := NewPackageCompilation(bp, true, pc.findDependComplation)
-	pc.compliants[bp.ImportPath] = unit
+	pkg := NewPackageCompilation(bp, true, pc.importDependPkg)
+	pc.compliantCache[bp.ImportPath] = pkg
 
-	return unit.Clone(), nil
+	return pkg.Clone(), nil
 }

@@ -8,71 +8,57 @@ import (
 )
 
 type vcsPath struct {
-	prefix string // prefix this description applies to
-	re     string // pattern for import path
-	repo   string // repository to use (expand with match of re)
-	vcs    string // version control system to use (expand with match of re)
+	re string // pattern for import path
 
 	regexp *regexp.Regexp // cached compiled form of re
 }
 
-var srv = &vcsPath{
-	prefix: "github.com/",
-	re:     `^(?P<root>github\.com/[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+)(/[\p{L}0-9_.\-]+)*$`,
-	repo:   "https://{root}",
+var githubRegex = &vcsPath{
+	re: `^(?P<root>github\.com/[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+)(/[\p{L}0-9_.\-]+)*$`,
 }
 
 func init() {
-	srv.regexp = regexp.MustCompile(srv.re)
+	githubRegex.regexp = regexp.MustCompile(githubRegex.re)
 }
 
 var (
-	errUnknownSite = errors.New("dynamic lookup required to find mapping")
-	golangCorpus   = "golang.org"
+	errUnknownVCS = errors.New("not valid VCS path")
+	golangCorpus  = "golang.org"
 )
 
 type RepoPath struct {
-	// Repo is the repository URL, including scheme.
+	// Repo is the root path of the repository.
 	Repo string
-
-	// Root is the import path corresponding to the root of the
-	// repository.
-	Root string
 
 	// import path relative to repo root
 	Path string
 }
 
-func VCSRepoPath(importPath string) (*RepoPath, error) {
-	m := srv.regexp.FindStringSubmatch(importPath)
+// VCSPath resolves import path into {repo address(with schema), repo root path, import path relative to repo root}
+func VCSPath(importPath string) (*RepoPath, error) {
+	m := githubRegex.regexp.FindStringSubmatch(importPath)
 	if m == nil {
-		return nil, errUnknownSite
+		return nil, errUnknownVCS
 	}
 
 	// Build map of named subexpression matches for expand.
-	match := map[string]string{
-		"prefix": srv.prefix,
-	}
-	for i, name := range srv.regexp.SubexpNames() {
+	match := make(map[string]string)
+	for i, name := range githubRegex.regexp.SubexpNames() {
 		if name != "" && match[name] == "" {
 			match[name] = m[i]
 		}
 	}
 
-	if srv.repo != "" {
-		match["repo"] = expand(match, srv.repo)
-	}
-
 	return &RepoPath{
-		Repo: match["repo"],
-		Root: match["root"],
+		Repo: match["root"],
 		Path: strings.TrimPrefix(strings.TrimPrefix(importPath, match["root"]), "/"),
 	}, nil
 }
 
+// RepoForPackage resolves package path contains {repo address(with schema), repo root path, import path relative to repo root}
 func RepoForPackage(bp *build.Package) *RepoPath {
 	importPath := bp.ImportPath
-	if r, err := VCSRepoPath(importPath); err == nil {
+	if r, err := VCSPath(importPath); err == nil {
 		return r
 	}
 
@@ -83,27 +69,16 @@ func RepoForPackage(bp *build.Package) *RepoPath {
 		// implied to be "golang.org", but can be configured to use the default
 		// corpus instead.
 		r.Repo = golangCorpus
-		r.Root = golangCorpus
 	} else if strings.HasPrefix(importPath, ".") {
 		// Local import; no corpus
 	} else if i := strings.Index(importPath, "/"); i > 0 {
 		// Take the first slash-delimited component to be the corpus.
-		// e.g., import "foo/bar/baz" ⇒ corpus "foo", signature "bar/baz".
+		// e.g., import "foo/bar/baz" ⇒ repo "foo", path "bar/baz".
 		r.Repo = importPath[:i]
-		r.Root = importPath[:i]
 		r.Path = importPath[i+1:]
 	}
 
 	return r
-}
-
-// ForBuiltin returns a VName for a Go built-in with the given signature.
-func RepoForBuiltin(signature string) *RepoPath {
-	return &RepoPath{
-		Repo: golangCorpus,
-		Root: "ref/spec",
-		Path: signature,
-	}
 }
 
 // expand rewrites s to replace {k} with match[k] for each key k in match.

@@ -131,7 +131,7 @@ func buildContextEnv(ctx build.Context) ([]string, error) {
 	return vars, nil
 }
 
-func (pc *PackageComplier) listPackages(ctx build.Context, query ...string) ([]*jsonPackage, error) {
+func (pc *PackageCompiler) listPackages(ctx build.Context, query ...string) ([]*jsonPackage, error) {
 	// TODO: support GOPACKAGESDRIVER
 	args := append([]string{"list",
 		"-compiler=" + ctx.Compiler,

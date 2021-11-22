@@ -8,11 +8,15 @@ import (
 )
 
 func main() {
-	c := extractor.NewPackageComplier(build.Default, "github.com/IANTHEREAL/logutil/extractor/go")
-	compliant, err := c.Compile()
+	c := extractor.NewPackageComplier(build.Default)
+
+	compliant, err := c.Compile("github.com/IANTHEREAL/logutil/extractor/go")
 	if err != nil {
 		log.Fatalf("package compilation failed %s", err)
 	}
+
+	analyzer := extractor.NewAstAnalyzer()
+	compliant.RunAnalyze(analyzer)
 	log.Printf("package compliant %s %+v", compliant.ImportPath, compliant.Repo)
 
 	/*	for name, fi := range compliant.SourceFiles {

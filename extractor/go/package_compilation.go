@@ -5,99 +5,115 @@ import (
 	"fmt"
 	"go/ast"
 	"go/build"
-	"go/parser"
 	"go/token"
 	"go/types"
 	"log"
 	"os"
 	"strings"
 
-	proto_common "github.com/IANTHEREAL/logutil/pkg/proto/common_go"
 	"github.com/IANTHEREAL/logutil/pkg/util"
 	"golang.org/x/tools/go/gcexportdata"
 )
 
-type PackageCompilation struct {
-	ctx           build.Context
-	Name          proto_common.XVName
-	Repo          *util.RepoPath
-	ImportPath    string
-	DepOnly       bool
-	BuiledPackage *build.Package
-	SourceFiles   map[string]*FileInfo // file name => file info
-	Deps          map[string]*PackageCompilation
-	FileSet       map[string]*FileCompilation
+// PackageCompilation helps to compile package to get AST set and type use info
+// usage:
+//  compilation := NewPackageCompilation(build.Package, depOnly, importDependFn)
+//  err := compilation.Compile()   // compile package to get file AST
+//  ...
+//  fileCompilation := compilation.GetFileCompilation() // get all file compilation with file AST
+//  fileCompilation.Aanalyze(astAnalyzer)
+//  or
+//  compilation.EachFileCompilation(astAnalyzer) // traverse file ast and analyze at the same time
 
-	dependFinder func(importPath string, pkgBaseDir string) (*PackageCompilation, error)
+type PackageCompilation struct {
+	// read only
+	ImportPath    string
+	Repo          *util.RepoPath
+	BuiledPackage *build.Package
+	DepOnly       bool
+
+	// written at compiling
+	Deps          map[string]*PackageCompilation
+	SourceFileSet map[string]*FileCompilation
+
+	helper         *AstHelper
+	dependImporter func(importPath string, pkgBaseDir string) (*PackageCompilation, error)
 }
 
-func NewPackageCompilation(pkg *build.Package, depOnly bool, fn func(string, pkgBaseDir string) (*PackageCompilation, error)) *PackageCompilation {
-	unit := &PackageCompilation{
-		ImportPath:    pkg.ImportPath,
-		Repo:          util.RepoForPackage(pkg),
-		DepOnly:       depOnly,
-		BuiledPackage: pkg,
-		SourceFiles:   make(map[string]*FileInfo),
-		Deps:          make(map[string]*PackageCompilation),
-		dependFinder:  fn,
+func NewPackageCompilation(pkg *build.Package, depOnly bool, fn func(importPath string, pkgBaseDir string) (*PackageCompilation, error)) *PackageCompilation {
+	pc := &PackageCompilation{
+		ImportPath:     pkg.ImportPath,
+		Repo:           util.RepoForPackage(pkg),
+		DepOnly:        depOnly,
+		BuiledPackage:  pkg,
+		dependImporter: fn,
+		Deps:           make(map[string]*PackageCompilation),
+		SourceFileSet:  make(map[string]*FileCompilation),
 	}
 
-	log.Printf("unit repo %s %+v", unit.ImportPath, unit.Repo)
+	log.Printf("new package %s %+v", pc.ImportPath, pc.Repo)
 
-	return unit
+	return pc
 }
 
 func (pcu *PackageCompilation) Clone() *PackageCompilation {
 	return &PackageCompilation{
-		ImportPath: pcu.ImportPath,
-		Repo: &util.RepoPath{
-			Repo: pcu.Repo.Repo,
-			Root: pcu.Repo.Root,
-			Path: pcu.Repo.Path,
-		},
-		DepOnly:       pcu.DepOnly,
-		BuiledPackage: pcu.BuiledPackage,
-		SourceFiles:   make(map[string]*FileInfo),
-		Deps:          make(map[string]*PackageCompilation),
-		dependFinder:  pcu.dependFinder,
+		ImportPath:     pcu.ImportPath,
+		Repo:           pcu.Repo,
+		DepOnly:        pcu.DepOnly,
+		BuiledPackage:  pcu.BuiledPackage,
+		dependImporter: pcu.dependImporter,
+		Deps:           make(map[string]*PackageCompilation),
+		SourceFileSet:  make(map[string]*FileCompilation),
 	}
 }
 
-func (pcu *PackageCompilation) Resolve() error {
-	// add source files
-	pcu.addSourceFiles()
-	// add source deps
-	missing := pcu.addDeps()
-	if len(missing) != 0 {
-		return &CompileMissingError{pcu.ImportPath, missing}
-	}
+// clear compilation information and initial related structure
+func (pcu *PackageCompilation) initial() {
+	pcu.Deps = make(map[string]*PackageCompilation)
+	pcu.SourceFileSet = make(map[string]*FileCompilation)
+}
+
+func (pcu *PackageCompilation) Compile() error {
+	// initial compilation
+	pcu.initial()
 
 	fetcher, err := pcu.load()
 	if err != nil {
 		return err
 	}
 
-	err = pcu.compile(fetcher)
-	if err != nil {
-		return err
+	return pcu.compile(fetcher)
+}
+
+func (pcu *PackageCompilation) RunAnalyze(ai Aanalyzer) {
+	for _, file := range pcu.SourceFileSet {
+		file.RunAnalyze(ai, pcu.helper)
+	}
+}
+
+func (pcu *PackageCompilation) load() (Fetcher, error) {
+	// add source files
+	pcu.addSourceFiles()
+
+	// add source deps
+	if err := pcu.addDepPkgs(); err != nil {
+		return nil, err
 	}
 
-	pcu.analyze()
-	return nil
+	return pcu.loadDepsContent()
 }
 
 func (pcu *PackageCompilation) addSourceFiles() {
 	baseDir := pcu.BuiledPackage.Dir
 	rootDir := pcu.BuiledPackage.Root
-	//log.Printf("add source files root %+v  base dir%+v files %+v", rootDir, baseDir, pcu.BuiledPackage.GoFiles)
 	for _, fileName := range pcu.BuiledPackage.GoFiles {
-		fi := NewFileInfo(rootDir, baseDir, fileName, pcu.Repo)
-		pcu.SourceFiles[fileName] = fi
-		//log.Printf("add source files root %+v  base dir%+v files %+v", rootDir, baseDir, fi)
+		fi := NewFileCompilation(rootDir, baseDir, fileName, pcu.Repo)
+		pcu.SourceFileSet[fileName] = fi
 	}
 }
 
-func (pcu *PackageCompilation) addDeps() []string {
+func (pcu *PackageCompilation) addDepPkgs() error {
 	baseDir := pcu.BuiledPackage.Dir
 	deps := pcu.BuiledPackage.Imports
 	var missing []string
@@ -105,97 +121,67 @@ func (pcu *PackageCompilation) addDeps() []string {
 	for _, depName := range deps {
 		if depName == "unsafe" {
 			// package unsafe is intrinsic; nothing to do
-		} else if unit, err := pcu.dependFinder(depName, baseDir); err != nil || unit.BuiledPackage.PkgObj == "" {
+		} else if dep, err := pcu.dependImporter(depName, baseDir); err != nil || dep.BuiledPackage.PkgObj == "" {
 			missing = append(missing, depName)
-			log.Printf("miss deps base dir %+v depend import path %+v", baseDir, depName)
-		} else if _, ok := pcu.Deps[unit.ImportPath]; !ok {
-			unit.SourceFiles[unit.BuiledPackage.PkgObj] = NewFileInfo(unit.BuiledPackage.Root, "", unit.BuiledPackage.PkgObj, pcu.Repo)
-			pcu.Deps[unit.ImportPath] = unit
-			log.Printf("add dep root %s files %+v", depName, unit.SourceFiles[unit.BuiledPackage.PkgObj])
+			log.Printf("miss dep for base dir %+v depend import path %+v", baseDir, depName)
+		} else if _, ok := pcu.Deps[dep.ImportPath]; !ok {
+			bp := dep.BuiledPackage
+			rootDir := bp.Root
+			pkgObj := bp.PkgObj
+			fc := NewFileCompilation(rootDir, "", bp.PkgObj, dep.Repo)
+			dep.SourceFileSet[pkgObj] = fc
+			pcu.Deps[dep.ImportPath] = dep
+			log.Printf("add dep %s -- repo %s -- path %s", depName, dep.Repo, fc.GetPath())
 		}
 	}
 
-	return missing
+	if len(missing) != 0 {
+		return &CompileMissingError{pcu.ImportPath, missing}
+	}
+
+	return nil
 }
 
-func (pcu *PackageCompilation) load() (mapFetcher, error) {
+func (pcu *PackageCompilation) loadDepsContent() (Fetcher, error) {
 	fetcher := make(mapFetcher)
-	//log.Printf("\n\n\n************** pkg %+v %+v", pcu.ImportPath, pcu.Repo)
-	// import path: github.com/IANTHEREAL/logutil/pkg/util repo: &{Repo:https://github.com/IANTHEREAL/logutil Root:github.com/IANTHEREAL/logutil Path:pkg/util}
-
-	filesInfo := make([]*FileInfo, 0, len(pcu.SourceFiles)+len(pcu.Deps))
-	for _, fi := range pcu.SourceFiles {
-		filesInfo = append(filesInfo, fi)
-	}
-	for _, dep := range pcu.Deps {
-		for _, fi := range dep.SourceFiles {
-			filesInfo = append(filesInfo, fi)
-		}
-	}
 
 	// Ensure all the file contents are loaded, and update the digests.
-	for _, fi := range filesInfo {
-		log.Printf("start fetch digest %s , path %s", fi.Digest, fi.Path)
-		/*
-			    sources file
-			    start deigest /Users/ianz/Work/go/src/github.com/pingcap/dm/dumpling/dumpling.go , path dumpling/dumpling.go
-			    end deigest af0483b2da8d7e47784bcb90604b113c3a8422818d7f73038f9a0a60b57c2b1b , path dumpling/dumpling.go
-
-				builtin pkg
-				start deigest /usr/local/go/pkg/darwin_amd64/context.a , path pkg/darwin_amd64/context.a
-				end deigest 8cd5bdbbd9eca1f15c8d408c1af7e790c62407a75057cdd4d77b34ee9489a44c , path pkg/darwin_amd64/context.a
-
-				other pkg
-				start deigest /Users/ianz/Library/Caches/go-build/43/43478aceaefb6d29989f4de0f5017fae40398a9afb1e5233af73e7259f45f12b-d ,
-				path /Users/ianz/Library/Caches/go-build/43/43478aceaefb6d29989f4de0f5017fae40398a9afb1e5233af73e7259f45f12b-d
-
-				end deigest 43478aceaefb6d29989f4de0f5017fae40398a9afb1e5233af73e7259f45f12b ,
-				path /Users/ianz/Library/Caches/go-build/43/43478aceaefb6d29989f4de0f5017fae40398a9afb1e5233af73e7259f45f12b-d
-		*/
-		if !strings.Contains(fi.Digest, "/") {
-			continue // skip those that are already complete
+	for name, dep := range pcu.Deps {
+		for _, fi := range dep.SourceFileSet {
+			filePath := fi.GetPath()
+			log.Printf("start load dep package %s - %s", name, filePath)
+			//todo: improve it for multiple packages
+			if !strings.Contains(filePath.Digest, "/") {
+				continue // skip those that are already complete
+			}
+			fd, err := fi.FetchFileData()
+			if err != nil {
+				return nil, fmt.Errorf("fetch file %s: %v", fi.GetPath(), err)
+			}
+			fetcher[fd.Digest] = fd.Content
 		}
-		rc, err := os.Open(fi.Digest)
-		if err != nil {
-			return nil, fmt.Errorf("opening input %s: %v", fi.Digest, err)
-		}
-		fd, err := FetchFileData(fi.Path, rc)
-		rc.Close()
-		if err != nil {
-			return nil, fmt.Errorf("fetch file %s: %v", fi.Digest, err)
-		}
-		fi.Digest = fd.Info.Digest
-		fetcher[fi.Digest] = fd.Content
 	}
 
 	return fetcher, nil
 }
 
-func (pcu *PackageCompilation) compile(fetcher mapFetcher) error {
-	fset := token.NewFileSet()              // location info for the parser
-	astMap := make(map[*ast.File]*FileInfo) // ast file → file info
-	floc := make(map[*token.File]*ast.File) // file → ast
-	fmap := make(map[string]*FileInfo)      // import path → file info
-	deps := make(map[string]*types.Package) // :: import path → package
-	astFiles := make([]*ast.File, 0, 1)     // parsed sources
+func (pcu *PackageCompilation) compile(fetcher Fetcher) error {
+	fset := token.NewFileSet()                // location info for the parser
+	floc := make(map[*token.File]*ast.File)   // file → ast
+	fmap := make(map[string]*FileCompilation) // import path → file info
+	deps := make(map[string]*types.Package)   // import path → package
+	astFiles := make([]*ast.File, 0, 1)       // parsed sources
 
-	for _, fi := range pcu.SourceFiles {
-		path := fi.Path
-		data, err := fetcher.Fetch(path, fi.Digest)
+	for _, fi := range pcu.SourceFileSet {
+		parsed, err := fi.Compile(fset)
 		if err != nil {
-			return fmt.Errorf("fetching %q (%s): %v", path, fi.Digest, err)
-		}
-
-		parsed, err := parser.ParseFile(fset, path, data, parser.AllErrors|parser.ParseComments)
-		if err != nil {
-			return fmt.Errorf("parsing %q: %v", path, err)
+			return err
 		}
 		astFiles = append(astFiles, parsed)
-		astMap[parsed] = fi
 	}
 
 	for _, dep := range pcu.Deps {
-		for _, fi := range dep.SourceFiles {
+		for _, fi := range dep.SourceFileSet {
 			fmap[dep.ImportPath] = fi
 		}
 	}
@@ -227,50 +213,33 @@ func (pcu *PackageCompilation) compile(fetcher mapFetcher) error {
 		Error:                    func(err error) { compileErrs = append(compileErrs, err) },
 	}
 
-	analyzer := &AstAnalyzer{
-		TypesInfo:    NewTypeInfo(),
-		Functions:    make(map[ast.Node]string),
-		PackageInits: make(map[*ast.File]string),
-	}
-	analyzer.Package, err = c.Check(astFiles[0].Name.Name, fset, astFiles, analyzer.TypesInfo)
+	typeinfo := NewTypeInfo()
+	pkg, err := c.Check(astFiles[0].Name.Name, fset, astFiles, typeinfo)
 	for i, cerr := range compileErrs {
 		log.Printf("compiling package error %d -  %s", i, cerr)
 	}
 	if err != nil {
 		return err
 	}
+	pcu.helper = NewAstHelper(pkg, fset, typeinfo)
 
-	pcu.FileSet = make(map[string]*FileCompilation)
-	for _, astFile := range astFiles {
-		fi := astMap[astFile]
-		if fi == nil {
-			return fmt.Errorf("not found file info for ast file %s", astFile.Name)
-		}
-		pcu.FileSet[fi.Digest] = &FileCompilation{
-			file:   fi,
-			fAst:   astFile,
-			fToken: fset,
-			ai:     analyzer,
-		}
-	}
-
-	return err
+	return nil
 }
 
-func (pcu *PackageCompilation) analyze() {
-	for name, fc := range pcu.FileSet {
+/*func (pcu *PackageCompilation) analyze() {
+	for name := range pcu.SourceFileSet {
 		log.Printf("ast name %s", name)
-		fc.Analyze()
+		//fc.Analyze()
 	}
-}
+}*/
 
 // packageImporter implements the types.Importer interface by fetching files
 // from the required inputs of a compilation unit.
 type packageImporter struct {
-	deps    map[string]*types.Package // packages already loaded
-	fileSet *token.FileSet            // source location information
-	fileMap map[string]*FileInfo      // :: import path → required input location
-	fetcher Fetcher                   // access to required input contents
+	deps    map[string]*types.Package   // packages already loaded
+	fileSet *token.FileSet              // source location information
+	fileMap map[string]*FileCompilation // import path → required input location
+	fetcher Fetcher                     // access to required input contents
 }
 
 // Import satisfies the types.Importer interface using the captured data from
@@ -287,18 +256,19 @@ func (pi *packageImporter) Import(importPath string) (*types.Package, error) {
 
 	// Fetch the required input holding the package for this import path, and
 	// load its export data for use by the type resolver.
-	fi := pi.fileMap[importPath]
-	if fi == nil {
+	fc := pi.fileMap[importPath]
+	if fc == nil {
 		return nil, fmt.Errorf("package %q not found", importPath)
 	}
+	fi := fc.GetPath()
 
-	data, err := pi.fetcher.Fetch(fi.Path, fi.Digest)
+	data, err := pi.fetcher.Fetch(fi.RelPath, fi.Digest)
 	if err != nil {
-		return nil, fmt.Errorf("fetching %q (%s): %v", fi.Path, fi.Digest, err)
+		return nil, fmt.Errorf("fetching %q (%s): %v", fi.RelPath, fi.Digest, err)
 	}
 	r, err := gcexportdata.NewReader(bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("reading export data in %q (%s): %v", fi.Path, fi.Digest, err)
+		return nil, fmt.Errorf("reading export data in %q (%s): %v", fi.RelPath, fi.Digest, err)
 	}
 	return gcexportdata.Read(r, pi.fileSet, pi.deps, importPath)
 }

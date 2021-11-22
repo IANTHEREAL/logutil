@@ -7,65 +7,43 @@ import (
 	"log"
 )
 
-// A visitFunc visits a node of the Go AST. The function can use stack to
-// retrieve AST nodes on the path from the node up to the root.  If the return
-// value is true, the children of node are also visited; otherwise they are
-// skipped.
-type visitFunc func(node ast.Node, stack stackFunc) bool
-
-// A stackFunc returns the ith stack entry above of an AST node, where 0
-// denotes the node itself. If the ith entry does not exist, the function
-// returns nil.
-type stackFunc func(i int) ast.Node
-
-// astVisitor implements ast.Visitor, passing each visited node to a callback
-// function.
-type astVisitor struct {
-	stack []ast.Node
-	visit visitFunc
+type Aanalyzer interface {
+	Run(*ast.File, *AstHelper)
 }
 
-func newASTVisitor(f visitFunc) ast.Visitor { return &astVisitor{visit: f} }
-
-// Visit implements the required method of the ast.Visitor interface.
-func (w *astVisitor) Visit(node ast.Node) ast.Visitor {
-	if node == nil {
-		w.stack = w.stack[:len(w.stack)-1] // pop
-		return w
-	}
-
-	w.stack = append(w.stack, node) // push
-	if !w.visit(node, w.parent) {
-		return nil
-	}
-	return w
-}
-
-func (w *astVisitor) parent(i int) ast.Node {
-	if i >= len(w.stack) {
-		return nil
-	}
-	return w.stack[len(w.stack)-1-i]
-}
-
-type AstAnalyzer struct {
-	Package   *types.Package
-	TypesInfo *types.Info
+type logAanalyzer struct {
+	helper *AstHelper
 
 	// todo: lock
 	Functions    map[ast.Node]string
 	PackageInits map[*ast.File]string
 }
 
-func NewAstAnalyzer() *AstAnalyzer {
-	return &AstAnalyzer{
-		TypesInfo:    NewTypeInfo(),
+func NewAstAnalyzer() *logAanalyzer {
+	return &logAanalyzer{
 		Functions:    make(map[ast.Node]string),
 		PackageInits: make(map[*ast.File]string),
 	}
 }
 
-func (ai *AstAnalyzer) isLog(id *ast.BasicLit, stack stackFunc) {
+func (ai *logAanalyzer) Run(file *ast.File, helper *AstHelper) {
+	ai.helper = helper
+	ast.Walk(newASTVisitor(func(node ast.Node, stack stackFunc) bool {
+		switch n := node.(type) {
+		case *ast.Ident:
+		//pcu.visitIdent(n, stack)
+		case *ast.FuncDecl:
+			ai.visitFuncDecl(n, stack)
+		case *ast.FuncLit:
+			ai.visitFuncLit(n, stack)
+		case *ast.BasicLit:
+			ai.isLog(n, stack)
+		}
+		return true
+	}), file)
+}
+
+func (ai *logAanalyzer) isLog(id *ast.BasicLit, stack stackFunc) {
 	//	log.Printf("stack %d, item %+v", i, stack(i))
 	switch p := stack(1).(type) {
 	case *ast.Ident, *ast.SelectorExpr:
@@ -78,8 +56,8 @@ func (ai *AstAnalyzer) isLog(id *ast.BasicLit, stack stackFunc) {
 	}
 }
 
-func (ai *AstAnalyzer) filterLog(x *ast.BasicLit, id *ast.Ident, stack stackFunc) {
-	obj := ai.TypesInfo.Uses[id]
+func (ai *logAanalyzer) filterLog(x *ast.BasicLit, id *ast.Ident, stack stackFunc) {
+	obj := ai.helper.GetTypeUsed(id)
 	if obj == nil {
 		// Defining identifiers are handled by their parent nodes.
 		return
@@ -93,15 +71,15 @@ func (ai *AstAnalyzer) filterLog(x *ast.BasicLit, id *ast.Ident, stack stackFunc
 
 		if (fnPkg == "log") && (fnName == "Print" || fnName == "Printf") {
 			//posInfo := fset.Position(id.Pos())
-			log.Printf("***************%d log %s, belong to function %s", id.Pos(), x.Value, callName)
+			log.Printf("***************%s log %s, belong to function %s", ai.helper.GetPos(id.Pos()), x.Value, callName)
 		}
 	}
 }
 
 // visitFuncDecl handles function and method declarations and their parameters.
-func (ai *AstAnalyzer) visitFuncDecl(decl *ast.FuncDecl, stack stackFunc) {
+func (ai *logAanalyzer) visitFuncDecl(decl *ast.FuncDecl, stack stackFunc) {
 	// Get the type of this function, even if its name is blank.
-	obj, _ := ai.TypesInfo.Defs[decl.Name].(*types.Func)
+	obj, _ := ai.helper.GetTypeDef(decl.Name).(*types.Func)
 	if obj == nil {
 		return // a redefinition, for example
 	}
@@ -111,7 +89,7 @@ func (ai *AstAnalyzer) visitFuncDecl(decl *ast.FuncDecl, stack stackFunc) {
 // visitFuncLit handles function literals and their parameters.  The signature
 // for a function literal is named relative to the signature of its parent
 // function, or the file scope if the literal is at the top level.
-func (ai *AstAnalyzer) visitFuncLit(flit *ast.FuncLit, stack stackFunc) {
+func (ai *logAanalyzer) visitFuncLit(flit *ast.FuncLit, stack stackFunc) {
 	fi := ai.callContext(stack)
 	if fi == "" {
 		log.Fatalf("Function literal without a context: ", flit)
@@ -122,10 +100,12 @@ func (ai *AstAnalyzer) visitFuncLit(flit *ast.FuncLit, stack stackFunc) {
 // callContext returns funcInfo for the nearest enclosing parent function, not
 // including the node itself, or the enclosing package initializer if the node
 // is at the top level.
-func (ai *AstAnalyzer) callContext(stack stackFunc) string {
+func (ai *logAanalyzer) callContext(stack stackFunc) string {
 	for i := 1; ; i++ {
 		switch p := stack(i).(type) {
-		case *ast.FuncDecl, *ast.FuncLit:
+		case *ast.FuncDecl:
+			return p.Name.Name
+		case *ast.FuncLit:
 			return ai.Functions[p]
 		case *ast.File:
 			fi := ai.PackageInits[p]
@@ -134,7 +114,7 @@ func (ai *AstAnalyzer) callContext(stack stackFunc) string {
 				// initializer for top-level expressions in this file of the
 				// package.  We only do this if there are expressions that need
 				// to be initialized.
-				fi = fmt.Sprintf("<init>@%d", ai.Package)
+				fi = fmt.Sprintf("<init>@%d", ai.helper.GetPackage())
 				ai.PackageInits[p] = fi
 			}
 			return fi
