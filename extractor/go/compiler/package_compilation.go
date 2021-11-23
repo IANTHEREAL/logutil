@@ -1,4 +1,4 @@
-package extractor_go
+package compiler
 
 import (
 	"bytes"
@@ -11,7 +11,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/IANTHEREAL/logutil/extractor/go/analyzer"
 	"github.com/IANTHEREAL/logutil/pkg/util"
+	logpattern "github.com/IANTHEREAL/logutil/proto"
 	"golang.org/x/tools/go/gcexportdata"
 )
 
@@ -20,15 +22,12 @@ import (
 //  compilation := NewPackageCompilation(build.Package, depOnly, importDependFn)
 //  err := compilation.Compile()   // compile package to get file AST
 //  ...
-//  fileCompilation := compilation.GetFileCompilation() // get all file compilation with file AST
-//  fileCompilation.Aanalyze(astAnalyzer)
-//  or
-//  compilation.EachFileCompilation(astAnalyzer) // traverse file ast and analyze at the same time
-
+//  fileCompilation := compilation.ForEach(fn func(*FileCompilation, *analysis.AstHelper)) // do analysis on file compliation
+//  it is not concurrency safe
 type PackageCompilation struct {
 	// read only
 	ImportPath    string
-	Repo          *util.RepoPath
+	PackagePath   *logpattern.PackagePath
 	BuiledPackage *build.Package
 	DepOnly       bool
 
@@ -36,39 +35,32 @@ type PackageCompilation struct {
 	Deps          map[string]*PackageCompilation
 	SourceFileSet map[string]*FileCompilation
 
-	helper         *AstHelper
+	helper         *analyzer.AstHelper
 	dependImporter func(importPath string, pkgBaseDir string) (*PackageCompilation, error)
 }
 
-func NewPackageCompilation(pkg *build.Package, depOnly bool, fn func(importPath string, pkgBaseDir string) (*PackageCompilation, error)) *PackageCompilation {
+// NewPackageCompilation creates a PackageCompilation using
+// - pkg -  type:build.Package, result of go/build.Import or go list cmd,
+// - depOnly - whether pkg is a depend-only package
+// - importDependFn - help to import depend-only package
+func NewPackageCompilation(pkg *build.Package, depOnly bool, importDependFn func(importPath string, pkgBaseDir string) (*PackageCompilation, error)) *PackageCompilation {
 	pc := &PackageCompilation{
 		ImportPath:     pkg.ImportPath,
-		Repo:           util.RepoForPackage(pkg),
+		PackagePath:    util.RepoForPackage(pkg),
 		DepOnly:        depOnly,
 		BuiledPackage:  pkg,
-		dependImporter: fn,
+		dependImporter: importDependFn,
 		Deps:           make(map[string]*PackageCompilation),
 		SourceFileSet:  make(map[string]*FileCompilation),
 	}
 
-	log.Printf("new package %s %+v", pc.ImportPath, pc.Repo)
+	log.Printf("new package %s %+v", pc.ImportPath, pc.PackagePath)
 
 	return pc
 }
 
-func (pcu *PackageCompilation) Clone() *PackageCompilation {
-	return &PackageCompilation{
-		ImportPath:     pcu.ImportPath,
-		Repo:           pcu.Repo,
-		DepOnly:        pcu.DepOnly,
-		BuiledPackage:  pcu.BuiledPackage,
-		dependImporter: pcu.dependImporter,
-		Deps:           make(map[string]*PackageCompilation),
-		SourceFileSet:  make(map[string]*FileCompilation),
-	}
-}
-
-// clear compilation information and initial related structure
+// clear source files and dependency packages data
+// which are compile runtime data
 func (pcu *PackageCompilation) initial() {
 	pcu.Deps = make(map[string]*PackageCompilation)
 	pcu.SourceFileSet = make(map[string]*FileCompilation)
@@ -86,37 +78,39 @@ func (pcu *PackageCompilation) Compile() error {
 	return pcu.compile(fetcher)
 }
 
-func (pcu *PackageCompilation) RunAnalyze(ai Aanalyzer) {
+// RunAnalyze helps analyzer to traverse and analyze source file
+func (pcu *PackageCompilation) ForEach(fn func(*FileCompilation, *analyzer.AstHelper)) {
 	for _, file := range pcu.SourceFileSet {
-		file.RunAnalyze(ai, pcu.helper)
+		fn(file, pcu.helper)
 	}
 }
 
+// load imports all source files and dependency package objects
 func (pcu *PackageCompilation) load() (Fetcher, error) {
-	// add source files
-	pcu.addSourceFiles()
+	// load source files
+	pcu.loadSourceFiles()
 
-	// add source deps
-	if err := pcu.addDepPkgs(); err != nil {
-		return nil, err
-	}
-
-	return pcu.loadDepsContent()
+	// load source deps
+	return pcu.loadDepPkgs()
 }
 
-func (pcu *PackageCompilation) addSourceFiles() {
+// loadSourceFiles loads all source files
+func (pcu *PackageCompilation) loadSourceFiles() {
 	baseDir := pcu.BuiledPackage.Dir
 	rootDir := pcu.BuiledPackage.Root
 	for _, fileName := range pcu.BuiledPackage.GoFiles {
-		fi := NewFileCompilation(rootDir, baseDir, fileName, pcu.Repo)
-		pcu.SourceFileSet[fileName] = fi
+		filePath := ComputeFilePath(rootDir, baseDir, fileName)
+		fc := NewFileCompilation(pcu.PackagePath, filePath)
+		pcu.SourceFileSet[fileName] = fc
 	}
 }
 
-func (pcu *PackageCompilation) addDepPkgs() error {
+// loadDepPkgs loads all dependency package objects
+func (pcu *PackageCompilation) loadDepPkgs() (Fetcher, error) {
 	baseDir := pcu.BuiledPackage.Dir
 	deps := pcu.BuiledPackage.Imports
 	var missing []string
+	fetcher := make(mapFetcher)
 
 	for _, depName := range deps {
 		if depName == "unsafe" {
@@ -126,51 +120,32 @@ func (pcu *PackageCompilation) addDepPkgs() error {
 			log.Printf("miss dep for base dir %+v depend import path %+v", baseDir, depName)
 		} else if _, ok := pcu.Deps[dep.ImportPath]; !ok {
 			bp := dep.BuiledPackage
-			rootDir := bp.Root
-			pkgObj := bp.PkgObj
-			fc := NewFileCompilation(rootDir, "", bp.PkgObj, dep.Repo)
-			dep.SourceFileSet[pkgObj] = fc
+			path := bp.PkgObj // package object absolute path
+
 			pcu.Deps[dep.ImportPath] = dep
-			log.Printf("add dep %s -- repo %s -- path %s", depName, dep.Repo, fc.GetPath())
+			fd, err := FetchFileData(path)
+			if err != nil {
+				return nil, fmt.Errorf("fetch dependency package object %s: %v", path, err)
+			}
+			fetcher[path] = fd.Content
+			log.Printf("load dep %s, repo %s ,path %s", depName, dep.ImportPath, path)
 		}
 	}
 
 	if len(missing) != 0 {
-		return &CompileMissingError{pcu.ImportPath, missing}
-	}
-
-	return nil
-}
-
-func (pcu *PackageCompilation) loadDepsContent() (Fetcher, error) {
-	fetcher := make(mapFetcher)
-
-	// Ensure all the file contents are loaded, and update the digests.
-	for name, dep := range pcu.Deps {
-		for _, fi := range dep.SourceFileSet {
-			filePath := fi.GetPath()
-			log.Printf("start load dep package %s - %s", name, filePath)
-			//todo: improve it for multiple packages
-			if !strings.Contains(filePath.Digest, "/") {
-				continue // skip those that are already complete
-			}
-			fd, err := fi.FetchFileData()
-			if err != nil {
-				return nil, fmt.Errorf("fetch file %s: %v", fi.GetPath(), err)
-			}
-			fetcher[fd.Digest] = fd.Content
-		}
+		return nil, &CompileMissingError{pcu.ImportPath, missing}
 	}
 
 	return fetcher, nil
 }
 
+// compile helps to parse source file to file ast and use a type check to resolve all type reference
 func (pcu *PackageCompilation) compile(fetcher Fetcher) error {
-	fset := token.NewFileSet()                // location info for the parser
-	floc := make(map[*token.File]*ast.File)   // file → ast
-	fmap := make(map[string]*FileCompilation) // import path → file info
-	deps := make(map[string]*types.Package)   // import path → package
-	astFiles := make([]*ast.File, 0, 1)       // parsed sources
+	fset := token.NewFileSet()              // location info for the parser
+	floc := make(map[*token.File]*ast.File) // file → ast
+	depPathMap := make(map[string]string)   // import path → package object absolute path
+	deps := make(map[string]*types.Package) // import path → package
+	astFiles := make([]*ast.File, 0, 1)     // parsed sources
 
 	for _, fi := range pcu.SourceFileSet {
 		parsed, err := fi.Compile(fset)
@@ -181,9 +156,7 @@ func (pcu *PackageCompilation) compile(fetcher Fetcher) error {
 	}
 
 	for _, dep := range pcu.Deps {
-		for _, fi := range dep.SourceFileSet {
-			fmap[dep.ImportPath] = fi
-		}
+		depPathMap[dep.ImportPath] = dep.BuiledPackage.PkgObj
 	}
 
 	// Populate the location mapping. This relies on the fact that Iterate
@@ -201,10 +174,10 @@ func (pcu *PackageCompilation) compile(fetcher Fetcher) error {
 		compileErrs []error
 	)
 	pi := &packageImporter{
-		deps:    deps,
-		fileSet: fset,
-		fileMap: fmap,
-		fetcher: fetcher,
+		deps:       deps,
+		fileSet:    fset,
+		depPathMap: depPathMap,
+		fetcher:    fetcher,
 	}
 	c := &types.Config{
 		FakeImportC:              true, // so we can handle cgo
@@ -221,25 +194,37 @@ func (pcu *PackageCompilation) compile(fetcher Fetcher) error {
 	if err != nil {
 		return err
 	}
-	pcu.helper = NewAstHelper(pkg, fset, typeinfo)
+	pcu.helper = analyzer.NewAstHelper(pkg, fset, typeinfo)
 
 	return nil
 }
 
-/*func (pcu *PackageCompilation) analyze() {
-	for name := range pcu.SourceFileSet {
-		log.Printf("ast name %s", name)
-		//fc.Analyze()
+// Clone clones a PackageCompilation
+// initial source files and dependency packages data which are compile runtime data
+func (pcu *PackageCompilation) Clone() *PackageCompilation {
+	return &PackageCompilation{
+		ImportPath:     pcu.ImportPath,
+		PackagePath:    pcu.PackagePath,
+		DepOnly:        pcu.DepOnly,
+		BuiledPackage:  pcu.BuiledPackage,
+		dependImporter: pcu.dependImporter,
+		Deps:           make(map[string]*PackageCompilation),
+		SourceFileSet:  make(map[string]*FileCompilation),
 	}
-}*/
+}
+
+// GetPackagePath return the package path
+func (pcu *PackageCompilation) GetPackagePath() *logpattern.PackagePath {
+	return pcu.PackagePath
+}
 
 // packageImporter implements the types.Importer interface by fetching files
-// from the required inputs of a compilation unit.
+// from required inputs of a package compilation.
 type packageImporter struct {
-	deps    map[string]*types.Package   // packages already loaded
-	fileSet *token.FileSet              // source location information
-	fileMap map[string]*FileCompilation // import path → required input location
-	fetcher Fetcher                     // access to required input contents
+	deps       map[string]*types.Package // packages already loaded
+	fileSet    *token.FileSet            // source location information
+	depPathMap map[string]string         // import path → package object absolute path
+	fetcher    Fetcher                   // access to required input contents
 }
 
 // Import satisfies the types.Importer interface using the captured data from
@@ -256,37 +241,20 @@ func (pi *packageImporter) Import(importPath string) (*types.Package, error) {
 
 	// Fetch the required input holding the package for this import path, and
 	// load its export data for use by the type resolver.
-	fc := pi.fileMap[importPath]
-	if fc == nil {
-		return nil, fmt.Errorf("package %q not found", importPath)
+	path, ok := pi.depPathMap[importPath]
+	if !ok {
+		return nil, fmt.Errorf("package %s not found", importPath)
 	}
-	fi := fc.GetPath()
 
-	data, err := pi.fetcher.Fetch(fi.RelPath, fi.Digest)
+	data, err := pi.fetcher.Fetch(path, importPath)
 	if err != nil {
-		return nil, fmt.Errorf("fetching %q (%s): %v", fi.RelPath, fi.Digest, err)
+		return nil, fmt.Errorf("fetching %s(%s): %v", importPath, path, err)
 	}
 	r, err := gcexportdata.NewReader(bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("reading export data in %q (%s): %v", fi.RelPath, fi.Digest, err)
+		return nil, fmt.Errorf("reading export data in %s(%s): %v", importPath, path, err)
 	}
 	return gcexportdata.Read(r, pi.fileSet, pi.deps, importPath)
-}
-
-// A Fetcher retrieves the contents of a file given its path and/or hex-encoded
-// SHA256 digest, at least one of which must be set.
-type Fetcher interface {
-	Fetch(path, digest string) ([]byte, error)
-}
-
-type mapFetcher map[string][]byte
-
-// Fetch implements the analysis.Fetcher interface. The path argument is ignored.
-func (m mapFetcher) Fetch(_, digest string) ([]byte, error) {
-	if data, ok := m[digest]; ok {
-		return data, nil
-	}
-	return nil, os.ErrNotExist
 }
 
 // CompileMissingError is the concrete type of errors about missing dependencies.
@@ -309,4 +277,22 @@ func NewTypeInfo() *types.Info {
 		Uses:      make(map[*ast.Ident]types.Object),
 		Implicits: make(map[ast.Node]types.Object),
 	}
+}
+
+// A Fetcher retrieves the contents of a file given its path and/or hex-encoded
+// SHA256 digest, at least one of which must be set.
+// TODO: put it into package compiler
+type Fetcher interface {
+	Fetch(path, digest string) ([]byte, error)
+}
+
+type mapFetcher map[string][]byte
+
+// Fetch implements the analysis.Fetcher interface.
+// The digest argument is ignored.
+func (m mapFetcher) Fetch(path, _ string) ([]byte, error) {
+	if data, ok := m[path]; ok {
+		return data, nil
+	}
+	return nil, os.ErrNotExist
 }

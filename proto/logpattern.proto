@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package logcov.proto.logpattern;
+
+option go_package = "logpattern_go_proto";
+
+// The path a package in a repo
+message PackagePath {
+   // repo name
+   // e.g. "tidb", "tikv", "github.com/pingcap/tidb"
+   string repo = 1;
+   // the path relative to repo root e.g. "pkg/util"
+   string path = 2;
+}
+
+// A Position represents a unique location within a repo.
+message Position {
+   PackagePath package_path = 1;
+
+   // A path-structured label describing the location of this object relative to
+   // the repo. For code, this will generally be the relative
+   // path to the file containing the log, e.g., "dm/dm-master/service.go" in dm.
+   string file_path = 2;
+
+   // The line number containing the position, 1-based.
+   int32 line_number = 3;
+ 
+   // The byte offset of the position within its line.
+   int32 column_offset = 4;
+}
+
+// Function information
+message FuncInfo {
+   // The function name
+   string name = 1;
+
+   // Function definied position
+   Position pos = 2;
+
+   // Function code
+   bytes code = 3;
+}
+
+// A LogPattern represents a log in code file
+message LogPattern {
+   // log position
+   Position pos = 1;
+   // The function this log belongs to
+   FuncInfo func = 2;
+   // used to quickly identify the log,
+   // e.g. the `format` field of Printf(format string, v ...interface{}) in golang
+   repeated string code_signature = 3;
+}

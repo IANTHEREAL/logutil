@@ -5,6 +5,8 @@ import (
 	"go/build"
 	"regexp"
 	"strings"
+
+	proto "github.com/IANTHEREAL/logutil/proto"
 )
 
 type vcsPath struct {
@@ -26,16 +28,8 @@ var (
 	golangCorpus  = "golang.org"
 )
 
-type RepoPath struct {
-	// Repo is the root path of the repository.
-	Repo string
-
-	// import path relative to repo root
-	Path string
-}
-
 // VCSPath resolves import path into {repo address(with schema), repo root path, import path relative to repo root}
-func VCSPath(importPath string) (*RepoPath, error) {
+func VCSPath(importPath string) (*proto.PackagePath, error) {
 	m := githubRegex.regexp.FindStringSubmatch(importPath)
 	if m == nil {
 		return nil, errUnknownVCS
@@ -49,20 +43,20 @@ func VCSPath(importPath string) (*RepoPath, error) {
 		}
 	}
 
-	return &RepoPath{
+	return &proto.PackagePath{
 		Repo: match["root"],
 		Path: strings.TrimPrefix(strings.TrimPrefix(importPath, match["root"]), "/"),
 	}, nil
 }
 
 // RepoForPackage resolves package path contains {repo address(with schema), repo root path, import path relative to repo root}
-func RepoForPackage(bp *build.Package) *RepoPath {
+func RepoForPackage(bp *build.Package) *proto.PackagePath {
 	importPath := bp.ImportPath
 	if r, err := VCSPath(importPath); err == nil {
 		return r
 	}
 
-	r := &RepoPath{}
+	r := &proto.PackagePath{}
 	r.Path = bp.ImportPath
 	if bp.Goroot {
 		// This is a Go standard library package. By default the corpus is

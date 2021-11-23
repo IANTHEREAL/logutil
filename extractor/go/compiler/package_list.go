@@ -1,4 +1,4 @@
-package extractor_go
+package compiler
 
 import (
 	"bytes"
