@@ -177,7 +177,45 @@ func (p *WritePool) Flush() error {
 }
 
 // Write implements part of the GraphStore interface.
-func (s *Store) Write(ctx context.Context, pattern *logpattern_go_proto.LogPattern) (err error) {
+func (s *Store) WriteLogPattern(ctx context.Context, pattern *logpattern_go_proto.LogPattern) (err error) {
+	key, err := EncodeLogKey(pattern.Pos)
+	if err != nil {
+		return fmt.Errorf("encoding error: %v", err)
+	}
+
+	value, err := pattern.Marshal()
+	if err != nil {
+		return fmt.Errorf("encoding error: %v", err)
+	}
+	return s.Write(ctx, key, value)
+}
+
+// Scan implements part of the graphstore.Service interface.
+func (s *Store) ScanLogPattern(ctx context.Context, fn func(key, value []byte) error) error {
+	return s.Scan(ctx, logKeyPrefixBytes, fn)
+}
+
+// Write implements part of the GraphStore interface.
+func (s *Store) WriteLogCoverage(ctx context.Context, coverage *logpattern_go_proto.Coverage) (err error) {
+	key, err := EncodeCoverageKey(coverage.Pos)
+	if err != nil {
+		return fmt.Errorf("encoding error: %v", err)
+	}
+
+	value, err := coverage.Marshal()
+	if err != nil {
+		return fmt.Errorf("encoding error: %v", err)
+	}
+	return s.Write(ctx, key, value)
+}
+
+// Scan implements part of the graphstore.Service interface.
+func (s *Store) ScanLogCoverage(ctx context.Context, fn func(key, value []byte) error) error {
+	return s.Scan(ctx, coverageKeyPrefixBytes, fn)
+}
+
+// Write implements part of the GraphStore interface.
+func (s *Store) Write(ctx context.Context, key, value []byte) (err error) {
 	wr, err := s.db.Writer(ctx)
 	if err != nil {
 		return fmt.Errorf("db writer error: %v", err)
@@ -189,16 +227,6 @@ func (s *Store) Write(ctx context.Context, pattern *logpattern_go_proto.LogPatte
 		}
 	}()
 
-	key, err := EncodeLogKey(pattern.Pos)
-	if err != nil {
-		return fmt.Errorf("encoding error: %v", err)
-	}
-
-	value, err := pattern.Marshal()
-	if err != nil {
-		return fmt.Errorf("encoding error: %v", err)
-	}
-
 	if err := wr.Write(key, value); err != nil {
 		return fmt.Errorf("db write error: %v", err)
 	}
@@ -206,8 +234,8 @@ func (s *Store) Write(ctx context.Context, pattern *logpattern_go_proto.LogPatte
 }
 
 // Scan implements part of the graphstore.Service interface.
-func (s *Store) Scan(ctx context.Context, fn func(key, value []byte) error) error {
-	iter, err := s.db.ScanPrefix(ctx, logKeyPrefixBytes, &Options{})
+func (s *Store) Scan(ctx context.Context, keyPrefix []byte, fn func(key, value []byte) error) error {
+	iter, err := s.db.ScanPrefix(ctx, keyPrefix, &Options{})
 	if err != nil {
 		return fmt.Errorf("db seek error: %v", err)
 	}
@@ -259,6 +287,23 @@ func EncodeLogKey(pos *logpattern_go_proto.Position) ([]byte, error) {
 
 	return bytes.Join([][]byte{
 		logKeyPrefixBytes,
+		posBytes,
+	}, nil), nil
+}
+
+// EncodeLogKey returns a canonical encoding of  entity key
+func EncodeCoverageKey(pos *logpattern_go_proto.Position) ([]byte, error) {
+	if pos == nil {
+		return nil, errors.New("invalid position: missing position for key encoding")
+	}
+
+	posBytes, err := pos.Marshal()
+	if err != nil {
+		return nil, err
+	}
+
+	return bytes.Join([][]byte{
+		coverageKeyPrefixBytes,
 		posBytes,
 	}, nil), nil
 }

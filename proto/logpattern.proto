@@ -47,7 +47,19 @@ message LogPattern {
    Position pos = 1;
    // The function this log belongs to
    FuncInfo func = 2;
+   // log level "info,warn,error" if has
+   string level = 3;
    // used to quickly identify the log,
-   // e.g. the `format` field of Printf(format string, v ...interface{}) in golang
-   repeated string code_signature = 3;
+   // e.g. the `format` field of Printf(format string, v ...interface{}) in 
+   repeated string signature = 4;
+}
+
+// Coverage data
+message Coverage {
+   // code position
+   Position pos = 1;
+   // total count to be covered
+   int32 cov_count = 2;
+   // the count to be covered in every file
+   map<string, int32> cov_count_by_log = 3;
 }

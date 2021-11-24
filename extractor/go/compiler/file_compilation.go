@@ -93,6 +93,7 @@ func (fc *FileCompilation) RunAnalysis(ai analyzer.Aanalyzer, helper *analyzer.A
 
 	log.Printf("analyze %s", fc.filePath)
 	ai.Run(fc.fAst, helper)
+	log.Printf("done  %s", fc.filePath)
 	return nil
 }
 

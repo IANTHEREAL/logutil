@@ -128,7 +128,7 @@ func (pcu *PackageCompilation) loadDepPkgs() (Fetcher, error) {
 				return nil, fmt.Errorf("fetch dependency package object %s: %v", path, err)
 			}
 			fetcher[path] = fd.Content
-			log.Printf("load dep %s, repo %s ,path %s", depName, dep.ImportPath, path)
+			//log.Printf("load dep %s, repo %s ,path %s", depName, dep.ImportPath, path)
 		}
 	}
 

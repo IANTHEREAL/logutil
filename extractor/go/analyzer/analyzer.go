@@ -23,10 +23,10 @@ type logAanalyzer struct {
 	// todo: add lock
 	logChan chan proto.Message
 
-	fn func(logPkg, logFn string) bool
+	fn func(logPkg, logFn, logMessage string) (string, bool)
 }
 
-func NewAstAnalyzer(fn func(logPkg, logFn string) bool) *logAanalyzer {
+func NewAstAnalyzer(fn func(logPkg, logFn, logMessage string) (string, bool)) *logAanalyzer {
 	return &logAanalyzer{fn: fn}
 }
 
@@ -47,7 +47,7 @@ func (ai *logAanalyzer) Run(file *ast.File, helper *AstHelper) {
 func (ai *logAanalyzer) SetupOutput() <-chan proto.Message {
 	ai.MarkDone()
 
-	ai.logChan = make(chan proto.Message, 10)
+	ai.logChan = make(chan proto.Message, 10000000)
 	return ai.logChan
 }
 
@@ -67,7 +67,8 @@ func (ai *logAanalyzer) filter(id *ast.BasicLit, stack stackFunc, helper *AstHel
 	}
 }
 
-func (ai *logAanalyzer) matchLog(log *ast.BasicLit, fn *ast.Ident, stack stackFunc, helper *AstHelper) {
+func (ai *logAanalyzer) matchLog(l *ast.BasicLit, fn *ast.Ident, stack stackFunc, helper *AstHelper) {
+	//log.Printf("match log %+v", l)
 	obj := helper.GetTypeUsed(fn)
 	if obj == nil {
 		// Defining identifiers are handled by their parent nodes.
@@ -81,14 +82,18 @@ func (ai *logAanalyzer) matchLog(log *ast.BasicLit, fn *ast.Ident, stack stackFu
 		fnPkg := obj.Pkg().Name()
 		helper.GetPos(obj.Pos())
 
-		if ai.fn(fnPkg, fnName) {
+		if fnName == "ErrorFilterContextCanceled" {
+			//log.Fatalf("fnPkg %s", fnPkg)
+		}
+
+		if level, ok := ai.fn(fnPkg, fnName, l.Value); ok {
 			fnPos := helper.GetPos(rawCallFnPos)
 			fnProtoPos := &logpattern.Position{
 				FilePath:     fnPos.Filename,
 				LineNumber:   int32(fnPos.Line),
 				ColumnOffset: int32(fnPos.Offset),
 			}
-			logPos := helper.GetPos(log.Pos())
+			logPos := helper.GetPos(l.Pos())
 			logProtoPos := &logpattern.Position{
 				FilePath:     logPos.Filename,
 				LineNumber:   int32(logPos.Line),
@@ -101,12 +106,14 @@ func (ai *logAanalyzer) matchLog(log *ast.BasicLit, fn *ast.Ident, stack stackFu
 			}
 
 			ai.logChan <- &logpattern.LogPattern{
-				Pos:           logProtoPos,
-				Func:          fn,
-				CodeSignature: []string{fnName, log.Value},
+				Pos:       logProtoPos,
+				Func:      fn,
+				Level:     level,
+				Signature: []string{l.Value},
 			}
 		}
 	}
+	//log.Printf("done match log %+v", l)
 }
 
 // visitFuncDecl handles function and method declarations and their parameters.
@@ -132,6 +139,8 @@ func (ai *logAanalyzer) visitFuncLit(flit *ast.FuncLit, stack stackFunc, helper 
 // including the node itself, or the enclosing package initializer if the node
 // is at the top level.
 func (ai *logAanalyzer) callContext(stack stackFunc, helper *AstHelper) (string, token.Pos) {
+	//log.Printf("call conext %s", stack(0))
+	//defer log.Printf("done call conext %s", stack(0))
 	for i := 1; ; i++ {
 		switch p := stack(i).(type) {
 		case *ast.FuncDecl:

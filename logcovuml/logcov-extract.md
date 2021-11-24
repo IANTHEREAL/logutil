@@ -11,15 +11,12 @@ interface PatternSet {
     + writePattern()
 }
 
-class Corpus {
-    + iterator()
-    + next() File
-    + hasNext()
-    - constructAST()
-    - String corpusName
+class Repo {
+    + ForEach()
+    - GetRepoPath()
+    - String repoRootPath
     - Pkg *pkgSet[]
 }
-note bottom of Corpus: Corpus is a project repo contains multiple packages
 
 class PackageCompilation  {
     - FileCompilation *fileSet[]
@@ -36,32 +33,33 @@ class FileCompilation {
 }
 
 class Build {
-    + build()
+    + Build()
 }
 
 class Traverse {
-    + walk()
+    + Visit()
 }
 
 class Filter {
-    + filter(File)
+    + Filter()
 }
 
 class FilePatternSet {
-    + writePattern()
+    + WritePattern()
 }
 
 object Controller
 
-Corpus --|> ObjectIterator
+Repo --|> ObjectIterator
 FilePatternSet --|> PatternSet
 
-Corpus o-right- PackageCompilation
+Repo o-right- PackageCompilation
 PackageCompilation o-right- FileCompilation
 
-Build ..> Corpus
-Traverse ..> Corpus
+Build ..> Repo
+Traverse ..> Repo
 Traverse ..> PackageCompilation
+Filter ..> FileCompilation
 
 Build .r. Traverse
 Traverse .r. Filter
