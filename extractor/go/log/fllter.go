@@ -19,23 +19,22 @@ type LogPkgFilter interface {
 	Filter(pkgName, fnName, logMesage string, opt *LogPatternRule) (string, bool)
 }
 
-var filterHub *FilterHub
+var filterHub = make(map[string]LogPkgFilter)
 
-func logPkgFilterRegister(pkgPath string, filter LogPkgFilter) {
-	filterHub.logPkgFilterMap[pkgPath] = filter
+func RegisterLogPkgFilter(pkgPath string, filter LogPkgFilter) {
+	if _, exist := filterHub[pkgPath]; exist {
+		log.Fatalf("log pkg pattern filter hub for kind %s already exists", pkgPath)
+	}
+	filterHub[pkgPath] = filter
 }
 
 func init() {
-	filterHub = &FilterHub{
-		logPkgFilterMap: make(map[string]LogPkgFilter),
-	}
-	logPkgFilterRegister("log", &officalLog{})
-	logPkgFilterRegister("zap", &zapLog{})
+	RegisterLogPkgFilter("log", &officalLog{})
+	RegisterLogPkgFilter("zap", &zapLog{})
 }
 
 // FilterHub accpets various log filtering methods, and try them one by one in
 type FilterHub struct {
-	filterRule      *LogPatternRule
 	logPkgFilterMap map[string]LogPkgFilter
 }
 
@@ -50,7 +49,7 @@ func NewFilter(rule *LogPatternRule) *Filter {
 
 // Filter used to log packaga/function name, and log format data to compute match result
 func (f *Filter) Filter(pkgName, fnName, logMesage string) (string, bool) {
-	for _, filter := range filterHub.logPkgFilterMap {
+	for _, filter := range filterHub {
 		if level, isLog := filter.Filter(pkgName, fnName, logMesage, f.filterRule); isLog {
 			log.Printf("mateched log %s %s %s", pkgName, fnName, logMesage)
 			return level, true
@@ -63,7 +62,7 @@ func (f *Filter) Filter(pkgName, fnName, logMesage string) (string, bool) {
 type officalLog struct{}
 
 func (l *officalLog) Filter(pkgName, fnName, logMesage string, opt *LogPatternRule) (string, bool) {
-	if pkgName == "log" && fnName == "ErrorFilterContextCanceled" {
+	if pkgName == "log" && (fnName == "ErrorFilterContextCanceled" || fnName == "Error" || fnName == "Errorf") {
 		return "error", true
 	}
 

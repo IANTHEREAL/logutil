@@ -15,21 +15,18 @@ var (
 	ErrLogIncomplete  = errors.New("incomplete log")
 )
 
-type logParserHub map[string]LogParser
+var hub = make(map[string]LogParser)
 
-var hub logParserHub
-
-func registerLogParser(name string, l LogParser) {
-	if hub == nil {
-		return
+func RegisterLogParser(name string, l LogParser) {
+	if _, exist := hub[name]; exist {
+		log.Fatalf("log parser hub for kind %s already exists", name)
 	}
 
 	hub[name] = l
 }
 
 func init() {
-	hub = make(map[string]LogParser)
-	registerLogParser("zap", &zapLogParser{})
+	RegisterLogParser("zap", &zapLogParser{})
 }
 
 type LogScanner struct {

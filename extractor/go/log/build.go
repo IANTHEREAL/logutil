@@ -1,6 +1,7 @@
 package log_extractor
 
 import (
+	"errors"
 	"go/build"
 	"log"
 	"os"
@@ -26,6 +27,11 @@ import (
 type Builder struct{}
 
 func (b *Builder) Build(ctx build.Context, repoPath string) (*Repo, error) {
+	importPath, err := dirToImport(ctx, repoPath)
+	if err != nil {
+		return nil, err
+	}
+
 	pkgPaths, err := fetchAllPkgs(ctx, repoPath)
 	if err != nil {
 		return nil, err
@@ -43,7 +49,7 @@ func (b *Builder) Build(ctx build.Context, repoPath string) (*Repo, error) {
 		compilations = append(compilations, compliant)
 	}
 
-	return NewRepo(dirToImport(ctx, repoPath), compilations), nil
+	return NewRepo(importPath, compilations), nil
 }
 
 func fetchAllPkgs(ctx build.Context, repoPath string) ([]string, error) {
@@ -67,7 +73,8 @@ func fetchAllPkgs(ctx build.Context, repoPath string) ([]string, error) {
 
 	pkgDirs := make([]string, 0, len(dirMap))
 	for pkg := range dirMap {
-		pkgDirs = append(pkgDirs, dirToImport(ctx, pkg))
+		pkgImportPath, _ := dirToImport(ctx, pkg)
+		pkgDirs = append(pkgDirs, pkgImportPath)
 	}
 
 	return pkgDirs, nil
@@ -109,13 +116,15 @@ func (r *Repo) GetRepoPath() string {
 	return r.repoRoot
 }
 
-func dirToImport(ctx build.Context, dir string) string {
+var ErrNotSupportLocalImport = errors.New("not support local import, please put repo under right path of the $GOPATH, e.g. $GOPATH/src/github.com/org/repo")
+
+func dirToImport(ctx build.Context, dir string) (string, error) {
 	for _, src := range ctx.SrcDirs() {
 		if strings.HasPrefix(dir, src) {
 			if rel, err := filepath.Rel(src, dir); err == nil {
-				return rel
+				return rel, nil
 			}
 		}
 	}
-	return dir
+	return dir, ErrNotSupportLocalImport
 }

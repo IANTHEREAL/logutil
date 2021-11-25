@@ -100,7 +100,14 @@ func (t *patternTrie) insert(root *node, key string, pattern *logpattern_go_prot
 	)
 
 	for i := 0; i < len(key); i++ {
-		switch key[i] {
+		b := key[i]
+		if key[i] == '%' {
+			index, symbol := repalceFormatPlaceholder(key[i+1:])
+			b = symbol
+			i = i + index
+		}
+
+		switch b {
 		case asterisk:
 			entity = n.asterisk
 		case question:
@@ -227,4 +234,45 @@ func (res *MatchedResult) append(entity item) {
 			res.Patterns = append(res.Patterns, pattern)
 		}
 	}
+}
+
+func repalceFormatPlaceholder(str string) (int, byte) {
+	if len(str) == 0 {
+		return 0, asterisk
+	}
+
+	if str[0] == '%' {
+		return 1, '%'
+	}
+
+	for index, b := range str {
+		if _, ok := formatPlaceholder[byte(b)]; ok {
+			return index + 1, asterisk
+		}
+	}
+
+	return len(str), asterisk
+}
+
+var formatPlaceholder = map[byte]struct{}{
+	'v': {},
+	'T': {},
+	't': {},
+	'b': {},
+	'c': {},
+	'd': {},
+	'o': {},
+	'O': {},
+	'q': {},
+	'x': {},
+	'X': {},
+	'U': {},
+	'e': {},
+	'E': {},
+	'f': {},
+	'F': {},
+	'g': {},
+	'G': {},
+	's': {},
+	'p': {},
 }
