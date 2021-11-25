@@ -77,7 +77,7 @@ func (l *LogScanner) Scan() (*Log, error) {
 
 func (l *LogScanner) selectLogParser(content []byte) error {
 	for name, parser := range hub {
-		if parser.IsValidLog(content) {
+		if parser.IsValid(content) {
 			log.Printf("elect parser %s for log %s", name, l.logPath)
 			l.parser = parser
 
@@ -167,7 +167,7 @@ func (l *Log) String() string {
 
 type LogParser interface {
 	Parse(content []byte) (*Log, error)
-	IsValidLog(content []byte) bool
+	IsValid(content []byte) bool
 }
 
 type zapLogParser struct {
@@ -177,7 +177,7 @@ func newZapLogParser() LogParser {
 	return &zapLogParser{}
 }
 
-func (z *zapLogParser) IsValidLog(content []byte) bool {
+func (z *zapLogParser) IsValid(content []byte) bool {
 	_, err := z.Parse(content)
 	return err == nil
 }

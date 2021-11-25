@@ -1,103 +1,113 @@
 @startuml
 
-interface ObjectIterator {
-    + iterator()
-    + next()
-    + hasNext()
+interface KV {
+    + Write(key, value)
+    + Get(key) value
+    + Scan(range) 
 }
 
-interface Reader {
-    + scanLine()
+interface LogReader {
+    + Scan() []byte
 }
 
-interface PatternSet {
-    + encodePattern()
-    + writePattern()
-    + matchPattern()
-    + encodeCoverage()
-    + recordCoverage()
+interface LogParser {
+    + Parse() Log
+    + IsThisLog()
 }
 
 class FileReader {
-    + scanLine()
+    + Scan() []byte
+    - FD reader
+    - String logPath
 }
 
-class LogReader {
-    + ScanOneLog() Log
-    - FileReader reader
-    - String uniqueLogPath
+class ZapLogParser {
+    + Parse() Log
+    + IsLog() bool
 }
 
-class LogSet {
-    + iterator()
-    + next() Log
-    + hasNext()
-    - LogReader *logs[]
+class LogScanner {
+    + scan()
+    - String logPath
+    - LogParser parser
+    - LogReader reader
 }
 
-object CodePosition {
+class Pipeline {
+    + Run()
+    - LogScanner[]  scannerSet
+    - PatternMatcher parser
+    - LogCoverager coverager 
+}
+
+object Position {
     + String file
     + Int32  lineNo
 }
 
 object Log {
     + String path
-    + CodePosition pos
+    + Position pos
     + String logLevel
     + String content
 }
 
-class Scanner {
-    + scan()
-    - LogSet logs
-
+class PatternMatcher {
+    + Match(Log) Pattern[]
+    - PatternTrie trie
 }
 
-class Matcher {
-    + match()
+Class PatternTrie {
+    + Insert(LogSignature, Pattern)
+    + Match(Log)
+    - TreeNode *root
+}
+
+class LogCoverager {
+    + Compute(Log, Pattern)
     - FilePatternSet patternSet
 }
 
-class Coverage {
-    + record()
-    - FilePatternSet patternSet
+Class LevelDB {
+    + Write(key, value)
+    + Get(key) value
+    + Scan(range) 
 }
 
-class FilePatternSet {
-    + encodePattern()
-    + writePattern()
-    + matchPattern()
-    + encodeCoverage()
-    + recordCoverage()
-    - String filePath
+Class PatternSet {
+    - KV kv
+    + WritePattern()
+    + ScanPattern()
+    + WriteCoverage()
 }
 
-object PipelineController
 
-LogSet --|> ObjectIterator
-FileReader -r-|> Reader
-LogSet o-r- LogReader
-LogReader o-- FileReader
+LevelDB --|> KV
+FileReader --|> LogReader
+ZapLogParser --|> LogParser
 
-FilePatternSet -r-|> PatternSet
-Matcher o-d- FilePatternSet
-Coverage o-d- FilePatternSet
-Log o-d- CodePosition
+PatternSet o-- LevelDB
+LogScanner o-- FileReader
+LogScanner o-- ZapLogParser
+Log o-- Position
 
-Scanner o-d- LogSet
 
-Scanner .r. Matcher
-Matcher .r. Coverage
+Pipeline o-- LogScanner: scan runtime logs
+Pipeline o-- PatternMatcher: Match log base on log pattern
+Pipeline o-- LogCoverager: record log coverage
 
-PipelineController --> Scanner: scan runtime logs
-PipelineController --> Matcher: Match log base on log pattern
-PipelineController --> Coverage: record log coverage
+PatternMatcher o-- PatternTrie
+LogCoverager o-- PatternSet
+
+
+LogScanner .r. PatternMatcher
+PatternMatcher .r. LogCoverager
 
 
 together {
-    class Scanner
-    class Matcher
-    class Coverage
+    class LogScanner
+    class PatternMatcher
+    class LogCoverager
 }
 
 

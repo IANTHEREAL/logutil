@@ -1,60 +1,49 @@
 @startuml
 
-interface LogScanner {
-    + iterator()
-    + next()
-    + hasNext()
+interface KV {
+    + Write(key, value)
+    + Get(key) value
+    + Scan(range) 
 }
 
-interface PatternSet {
-    + encodePattern()
-    + writePattern()
-    + matchPattern()
-    + encodeCoverage()
-    + recordCoverage()
-    + CreateLogScanner()
+Class LevelDB {
+    + Write(key, value)
+    + Get(key) value
+    + Scan(range) 
 }
 
-class FilePatternSet {
-    + encodePattern()
-    + writePattern()
-    + matchPattern()
-    + encodeCoverage()
-    + recordCoverage()
-    + CreateLogScanner()
-    - String filePath
+Class PatternSet {
+    - KV kv
+    + WritePattern()
+    + ScanPattern()
+    + WriteCoverage()
+    + ScanCoverage()
 }
 
-class FileLogScanner {
-    + iterator()
-    + next()
-    + hasNext()
+class CoverageScanner {
+    - PatternSet store
+    + Scan() Coverage
 }
 
 class Scanner {
-    + scan()
-    - FilePatternSet patternSet
+    + Scan() Coverage[]
+    - CoverageScanner[] scannerSet
 }
 
 
 class Merger {
-    + merge()
-    + record()
-    - FilePatternSet patternSet
+    + Merge(Coverage[])
+    - PatternSet store
 }
-
 
 object PipelineController
 
-PatternSet ..> LogScanner
-FilePatternSet ..> FileLogScanner
+LevelDB --|> KV
 
-FilePatternSet --|> PatternSet
-FileLogScanner --|> LogScanner
-
-
-Merger o-d- FilePatternSet
-Scanner o-d- FilePatternSet
+PatternSet ..> LevelDB
+CoverageScanner ..> PatternSet
+Scanner ..> CoverageScanner
+Merger  ..> PatternSet
 
 Scanner .r. Merger
 

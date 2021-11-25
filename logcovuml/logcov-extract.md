@@ -1,42 +1,52 @@
 @startuml
 
-interface ObjectIterator {
-    + iterator()
-    + next()
-    + hasNext()
+interface Traverser {
+    + Visit()
 }
 
-interface PatternSet {
-    + encodePattern()
-    + writePattern()
+interface KV {
+    + Write(key, value)
+    + Get(key) value
+    + Scan(range) 
+}
+
+Class LevelDB {
+    + Write(key, value)
+    + Get(key) value
+    + Scan(range) 
+}
+
+Class PatternSet {
+    - KV kv
+    + WritePattern()
 }
 
 class Repo {
-    + ForEach()
+    + Visit()
     - GetRepoPath()
-    - String repoRootPath
-    - Pkg *pkgSet[]
+    - String repoRoot
+    - PackageCompilation *pkgSet[]
 }
 
 class PackageCompilation  {
     - FileCompilation *fileSet[]
     - String pkgName
-    + ForEach()
+    + Visit()
     + Compile()
 }
 
 class FileCompilation {
     + Compile()
-    + RunAnalysis(Func)
-    - String fileName[corpus/pkg/filename]
+    + RunAnalysis(func)
+    - String fileName[repo/pkg/filename]
     - *ast
 }
 
-class Build {
-    + Build()
+class Builder {
+    + Build(repoPath) *Repo
 }
 
-class Traverse {
+class Vistor {
     + Visit()
 }
 
@@ -44,37 +54,35 @@ class Filter {
     + Filter()
 }
 
-class FilePatternSet {
-    + WritePattern()
-}
-
 object Controller
 
-Repo --|> ObjectIterator
-FilePatternSet --|> PatternSet
+Repo --|> Traverser
+PackageCompilation --|> Traverser
+LevelDB --|> KV
 
+PatternSet o-right- LevelDB
 Repo o-right- PackageCompilation
 PackageCompilation o-right- FileCompilation
 
-Build ..> Repo
-Traverse ..> Repo
-Traverse ..> PackageCompilation
+Builder ..> Repo
+Vistor ..> Repo
+Vistor ..> PackageCompilation
 Filter ..> FileCompilation
 
-Build .r. Traverse
-Traverse .r. Filter
-Filter .r. FilePatternSet
+Builder .r. Vistor
+Vistor .r. Filter
+Filter .r. PatternSet
 
-Controller --> Build: build AST
-Controller --> Traverse: traverse
+Controller --> Builder: build AST
+Controller --> Vistor: traverse
 Controller --> Filter: filter log ast node
-Controller --> FilePatternSet: encode and save
+Controller --> PatternSet: encode and save
 
 
 together {
-    class Traverse
+    class Vistor
     class Filter
-    class FilePatternSet
+    class PatternSet
 }
 
 
