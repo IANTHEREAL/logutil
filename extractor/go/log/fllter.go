@@ -13,6 +13,24 @@ type LogPatternRule struct {
 	Signature []string
 }
 
+func (rule *LogPatternRule) Match(level string, message string) bool {
+	if rule == nil {
+		return true
+	}
+	levelMatched := true
+
+	if len(rule.Level) > 0 {
+		for _, l := range rule.Level {
+			if l == level {
+				levelMatched = true
+			}
+		}
+		levelMatched = false
+	}
+
+	return levelMatched
+}
+
 // LogPkgFilter designed to distinguish log levels according to the log package used,
 // e.g. the log.Errorf log.Warn method of the zap log package
 type LogPkgFilter interface {
@@ -51,7 +69,7 @@ func NewFilter(rule *LogPatternRule) *Filter {
 func (f *Filter) Filter(pkgName, fnName, logMesage string) (string, bool) {
 	for _, filter := range filterHub {
 		if level, isLog := filter.Filter(pkgName, fnName, logMesage, f.filterRule); isLog {
-			log.Printf("mateched log %s %s %s", pkgName, fnName, logMesage)
+			//log.Printf("mateched log %s %s %s", pkgName, fnName, logMesage)
 			return level, true
 		}
 	}
@@ -61,16 +79,28 @@ func (f *Filter) Filter(pkgName, fnName, logMesage string) (string, bool) {
 
 type officalLog struct{}
 
-func (l *officalLog) Filter(pkgName, fnName, logMesage string, opt *LogPatternRule) (string, bool) {
+func (l *officalLog) Filter(pkgName, fnName, logMesage string, rule *LogPatternRule) (string, bool) {
+	level, matched := "", false
+
 	if pkgName == "log" && (fnName == "ErrorFilterContextCanceled" || fnName == "Error" || fnName == "Errorf") {
-		return "error", true
+		level, matched = "error", true
 	}
 
-	return "", pkgName == "log" && (fnName == "Printf" || fnName == "Print")
+	if pkgName == "log" && (fnName == "Printf" || fnName == "Print") {
+		level, matched = "info", true
+	}
+
+	return level, matched && rule.Match(level, logMesage)
 }
 
 type zapLog struct{}
 
-func (z *zapLog) Filter(pkgName, fnName, logMesage string, opt *LogPatternRule) (string, bool) {
-	return "error", pkgName == "zap" && (fnName == "Errorf" || fnName == "Error" || fnName == "ErrorFilterContextCanceled")
+func (z *zapLog) Filter(pkgName, fnName, logMesage string, rule *LogPatternRule) (string, bool) {
+	level, matched := "", false
+
+	if pkgName == "zap" && (fnName == "Errorf" || fnName == "Error" || fnName == "ErrorFilterContextCanceled") {
+		level, matched = "error", true
+	}
+
+	return level, matched && rule.Match(level, logMesage)
 }

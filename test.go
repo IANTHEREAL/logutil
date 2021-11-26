@@ -4,6 +4,7 @@ import (
 	"context"
 	"go/build"
 	"log"
+	"os"
 	"path/filepath"
 	"sync"
 
@@ -25,9 +26,9 @@ func main() {
 
 	store := keyvalue.NewLogPatternStore(db)
 
-	//testReopoert(store)
+	testReopoert(store)
 	//testMatcher(store)
-	testPrintLogPattern(store)
+	//testPrintLogPattern(store)
 	//testPrintCoverage(store)
 	return
 
@@ -60,7 +61,7 @@ func main() {
 				Repo: repo.GetRepoPath(),
 			}
 
-			log.Printf("result log %s", lp)
+			//log.Printf("result log %s", lp)
 			err := store.WriteLogPattern(context.Background(), pattern)
 			if err != nil {
 				log.Printf("wirte log %s failed %v", lp, err)
@@ -74,15 +75,15 @@ func main() {
 
 	err = repo.ForEach(func(pkg *compiler.PackageCompilation) error {
 		wg.Add(1)
-		go func() {
-			pkg.ForEach(func(file *compiler.FileCompilation, helper *analyzer.AstHelper) {
-				err := file.RunAnalysis(ai, helper)
-				if err != nil {
-					log.Fatalf("analysis failed %v", err)
-				}
-			})
-			wg.Done()
-		}()
+		//go func() {
+		pkg.ForEach(func(file *compiler.FileCompilation, helper *analyzer.AstHelper) {
+			err := file.RunAnalysis(ai, helper)
+			if err != nil {
+				log.Fatalf("analysis failed %v", err)
+			}
+		})
+		wg.Done()
+		//}()
 
 		return nil
 	})
@@ -90,7 +91,7 @@ func main() {
 	wg.Wait()
 	ai.MarkDone()
 	if err != nil {
-		log.Fatalf("analyze failed %v", err)
+		log.Fatalf("analyze failed %d", err)
 	}
 	done.Wait()
 }
@@ -111,6 +112,9 @@ func testPrintLogPattern(store *keyvalue.Store) {
 }
 
 func testPrintCoverage(store *keyvalue.Store) {
+	//str := "xxx"
+	//log.Print("hehe", str[3:], str[2:], str[3:])
+
 	store.ScanLogCoverage(context.Background(), func(_, value []byte) error {
 
 		lp := &logpattern_go_proto.Coverage{}
@@ -125,19 +129,15 @@ func testPrintCoverage(store *keyvalue.Store) {
 }
 
 func testReopoert(store *keyvalue.Store) {
-	reporter, err := log_reporter.NewCoverager(store)
+	reporter, err := log_reporter.NewReporter(store, os.Stdout, "/Users/ianz/Work/go/src/github.com/IANTHEREAL/logutil/reporter/report_test_template.md")
 	if err != nil {
 		log.Fatalf("create coverage failed %v", err)
 	}
 
-	total, cov := reporter.OverallCoverage()
-	log.Printf("total error log %d, covered err log %d", total, cov)
-
-	reporter.ForEach(func(l *log_reporter.LogDetail) {
-		if l.Coverage != nil {
-			log.Printf("%s", l)
-		}
-	})
+	err = reporter.Output()
+	if err != nil {
+		log.Fatalf("output coverage failed %v", err)
+	}
 }
 
 func testMatcher(store *keyvalue.Store) {

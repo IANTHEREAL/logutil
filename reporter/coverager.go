@@ -30,9 +30,9 @@ func (l *LogDetail) String() string {
 }
 
 type Coverager struct {
-	details map[string]*LogDetail
+	Details map[string]*LogDetail
 
-	total, cov int
+	Total, Cov int
 
 	store *keyvalue.Store
 }
@@ -40,21 +40,15 @@ type Coverager struct {
 func NewCoverager(store *keyvalue.Store) (*Coverager, error) {
 	cov := &Coverager{
 		store:   store,
-		details: make(map[string]*LogDetail),
+		Details: make(map[string]*LogDetail),
 	}
 
 	err := cov.load(context.Background())
 	return cov, err
 }
 
-func (c *Coverager) ForEach(fn func(l *LogDetail)) {
-	for _, lg := range c.details {
-		fn(lg)
-	}
-}
-
 func (c *Coverager) OverallCoverage() (int, int) {
-	return c.total, c.cov
+	return c.Total, c.Cov
 }
 
 func posToStr(pos *logpattern_go_proto.Position) string {
@@ -70,9 +64,9 @@ func (c *Coverager) load(ctx context.Context) error {
 		}
 
 		path := posToStr(lp.Pos)
-		if d := c.details[path]; d == nil {
-			c.total++
-			c.details[path] = &LogDetail{
+		if d := c.Details[path]; d == nil {
+			c.Total++
+			c.Details[path] = &LogDetail{
 				Pattern: lp,
 			}
 		}
@@ -91,8 +85,8 @@ func (c *Coverager) load(ctx context.Context) error {
 		}
 
 		path := posToStr(lp.Pos)
-		if d := c.details[path]; d != nil {
-			c.cov++
+		if d := c.Details[path]; d != nil {
+			c.Cov++
 			d.Coverage = lp
 		} else {
 			log.Fatalf("not found reference log %s", lp)

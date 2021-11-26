@@ -82,9 +82,13 @@ func (ai *logAanalyzer) matchLog(l *ast.BasicLit, fn *ast.Ident, stack stackFunc
 		fnPkg := obj.Pkg().Name()
 		helper.GetPos(obj.Pos())
 
-		if fnName == "ErrorFilterContextCanceled" {
-			//log.Fatalf("fnPkg %s", fnPkg)
-		}
+		/*	if strings.Contains(fnName, "Error") {
+			if ((fnPkg == "fmt" || fnPkg == "status") && fnName == "Errorf") || (fnPkg == "msgp" && fnName == "WrapError") || (fnPkg == "errors" && fnName == "Errorf") || (fnPkg == "log" && fnName == "Errorf") {
+
+			} else {
+				log.Printf("fnPkg %s %s", fnPkg, fnName)
+			}
+		}*/
 
 		if level, ok := ai.fn(fnPkg, fnName, l.Value); ok {
 			fnPos := helper.GetPos(rawCallFnPos)
@@ -131,7 +135,7 @@ func (ai *logAanalyzer) visitFuncDecl(decl *ast.FuncDecl, stack stackFunc, helpe
 func (ai *logAanalyzer) visitFuncLit(flit *ast.FuncLit, stack stackFunc, helper *AstHelper) {
 	fi, _ := ai.callContext(stack, helper)
 	if fi == "" {
-		log.Fatalf("Function literal without a context: ", flit)
+		log.Fatalf("Function literal without a context: %v", flit)
 	}
 }
 

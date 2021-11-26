@@ -54,7 +54,7 @@ func NewPackageCompilation(pkg *build.Package, depOnly bool, importDependFn func
 		SourceFileSet:  make(map[string]*FileCompilation),
 	}
 
-	log.Printf("new package %s %+v", pc.ImportPath, pc.PackagePath)
+	//log.Printf("new package %s %+v", pc.ImportPath, pc.PackagePath)
 
 	return pc
 }
