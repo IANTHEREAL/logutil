@@ -48,8 +48,7 @@ func (p *PatternMatcher) load(ctx context.Context, repo string) error {
 			return err
 		}
 
-		patternPos := lp.Pos
-		if patternPos.PackagePath.Repo == repo && len(lp.Signature) > 0 {
+		if len(lp.Signature) > 0 {
 			logSingature := lp.Signature[0]
 			err := p.trie.Insert(logSingature, lp)
 			if err != nil {
