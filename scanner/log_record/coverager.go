@@ -1,13 +1,16 @@
-package log_scanner
+package recorder
 
 import (
 	"context"
+	"sync"
 
 	logpattern_go_proto "github.com/IANTHEREAL/logutil/proto"
+	scanner "github.com/IANTHEREAL/logutil/scanner/log_scan"
 	"github.com/IANTHEREAL/logutil/storage/keyvalue"
 )
 
 type Coverager struct {
+	sync.RWMutex
 	logCoverageCount map[*logpattern_go_proto.Position]*logpattern_go_proto.Coverage
 
 	store *keyvalue.Store
@@ -20,7 +23,8 @@ func NewCoverager(store *keyvalue.Store) *Coverager {
 	}
 }
 
-func (c *Coverager) Compute(l *Log, pattern *logpattern_go_proto.LogPattern) {
+func (c *Coverager) Compute(l *scanner.Log, pattern *logpattern_go_proto.LogPattern) {
+	c.Lock()
 	cov := c.logCoverageCount[pattern.Pos]
 	if cov == nil {
 		cov = &logpattern_go_proto.Coverage{
@@ -31,14 +35,18 @@ func (c *Coverager) Compute(l *Log, pattern *logpattern_go_proto.LogPattern) {
 	}
 
 	cov.CovCount = cov.CovCount + 1
-	if count, ok := cov.CovCountByLog[l.logPath]; !ok {
-		cov.CovCountByLog[l.logPath] = 1
+	if count, ok := cov.CovCountByLog[l.LogPath]; !ok {
+		cov.CovCountByLog[l.LogPath] = 1
 	} else {
-		cov.CovCountByLog[l.logPath] = count + 1
+		cov.CovCountByLog[l.LogPath] = count + 1
 	}
+	c.Unlock()
 }
 
 func (c *Coverager) Flush() error {
+	c.Lock()
+	defer c.Unlock()
+
 	for _, cov := range c.logCoverageCount {
 		err := c.store.WriteLogCoverage(context.Background(), cov)
 		if err != nil {

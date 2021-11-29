@@ -1,4 +1,4 @@
-package log_scanner
+package matcher
 
 import (
 	"errors"

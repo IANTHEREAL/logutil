@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"log"
 
 	log_scanner "github.com/IANTHEREAL/logutil/scanner"
@@ -47,12 +48,12 @@ func ScanLog(storePath string, logs []string) {
 
 	store := keyvalue.NewLogPatternStore(db)
 
-	p, err := log_scanner.NewPipeline(store, "", logs)
+	p, err := log_scanner.NewLogProcessor(store, logs)
 	if err != nil {
 		log.Fatalf("new scanner pipeline failed %s", err)
 	}
 
-	err = p.Run()
+	err = p.Run(context.Background())
 	if err != nil {
 		log.Fatalf("scanner run %s", err)
 	}

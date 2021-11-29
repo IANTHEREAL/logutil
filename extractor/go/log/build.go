@@ -7,14 +7,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/IANTHEREAL/logutil/extractor/go/compiler"
 )
 
-// Builer used to compile golang project into compilation package set
-// input - ctx is go/build Conext with customize the variables for go build
-// input - repoPath is the directory path where project under $GOPATH or $GOPATH
-// return - Repo is a object contains package compilation set
+// Builer used to compile golang project into multiple package compilations
+// input - ctx is go/build Conext with customize the variables for build golang package
+// input - repoPath is the directory path where project under $GOPATH or $GOROOT
+// return - Repo is a object contains all package compilations under the repo
 /* uasage:
     builder := &logextractor.Builder{}
 	...
@@ -39,19 +41,39 @@ func (b *Builder) Build(ctx build.Context, repoPath string) (*Repo, error) {
 
 	compilations := make([]*compiler.PackageCompilation, 0, len(pkgPaths))
 	c := compiler.NewPackageComplier(build.Default)
+
+	// compile packages concurrently
+	wg := sync.WaitGroup{}
+	ch := make(chan *compiler.PackageCompilation, len(pkgPaths))
+	startTime := time.Now()
 	for _, importPath := range pkgPaths {
-		compliant, err := c.Compile(importPath)
-		if err != nil {
-			log.Printf("compile package %s failed, skip it", importPath)
-			continue
-		}
-
-		compilations = append(compilations, compliant)
+		wg.Add(1)
+		go func(importPath string) {
+			compilation, err := c.Compile(importPath)
+			if err != nil {
+				log.Printf("compile package %s failed: %v, skip it", importPath, err)
+			} else {
+				ch <- compilation
+			}
+			wg.Done()
+		}(importPath)
 	}
+	wg.Wait()
+	close(ch)
+	log.Printf("compile package cost time %s", time.Since(startTime))
 
+	for {
+		compilation, ok := <-ch
+		if !ok {
+			break
+		}
+		compilations = append(compilations, compilation)
+	}
 	return NewRepo(importPath, compilations), nil
 }
 
+// fetchAllPkgs finds all directories that contains at least one go source file,
+// one directory is one package
 func fetchAllPkgs(ctx build.Context, repoPath string) ([]string, error) {
 	dirMap := make(map[string]struct{})
 	err := filepath.Walk(repoPath, func(path string, info os.FileInfo, err error) error {
@@ -73,6 +95,7 @@ func fetchAllPkgs(ctx build.Context, repoPath string) ([]string, error) {
 
 	pkgDirs := make([]string, 0, len(dirMap))
 	for pkg := range dirMap {
+		// try to compute import path
 		pkgImportPath, _ := dirToImport(ctx, pkg)
 		pkgDirs = append(pkgDirs, pkgImportPath)
 	}
@@ -80,7 +103,7 @@ func fetchAllPkgs(ctx build.Context, repoPath string) ([]string, error) {
 	return pkgDirs, nil
 }
 
-// Repo is a object contains package compilation set
+// Repo is a object contains multiple package compilations
 // it provide ForEach() function to let caller visit every package compilation serially
 /* uasage:
     repo := NewRepo(repo)
@@ -118,6 +141,8 @@ func (r *Repo) GetRepoPath() string {
 
 var ErrNotSupportLocalImport = errors.New("not support local import, please put repo under right path of the $GOPATH, e.g. $GOPATH/src/github.com/org/repo")
 
+// try to compute import path relative to GOPATH or GOROOT.
+// Now we only support import package that under GOPATH/GOROOT, otherwise return ErrNotSupportLocalImport
 func dirToImport(ctx build.Context, dir string) (string, error) {
 	for _, src := range ctx.SrcDirs() {
 		if strings.HasPrefix(dir, src) {

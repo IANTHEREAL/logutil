@@ -6,13 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 
 	logpattern_go_proto "github.com/IANTHEREAL/logutil/proto"
 )
-
-// debug controls whether debugging information is emitted
-const debug = false
 
 // Size represents the size of data in bytes.
 type Size uint64
@@ -31,7 +27,7 @@ const (
 	Pebibyte      = 1024 * Tebibyte
 )
 
-// A Store implements the log pattern store interface for a keyvalue DB
+// A Store implements the log pattern store to persist data such as log pattern and coverage
 type Store struct {
 	db DB
 }
@@ -167,16 +163,13 @@ func (p *WritePool) Flush() error {
 	if p.wr == nil {
 		return nil
 	}
-	if debug {
-		log.Printf("Flushing (%d) %d", p.writes, Size(p.size))
-	}
 	err := p.wr.Close()
 	p.wr = nil
 	p.size, p.writes = 0, 0
 	return err
 }
 
-// Write implements part of the GraphStore interface.
+// WriteLogPattern used write log pattern entity into keyvalue DB.
 func (s *Store) WriteLogPattern(ctx context.Context, pattern *logpattern_go_proto.LogPattern) (err error) {
 	key, err := EncodeLogKey(pattern.Pos)
 	if err != nil {
@@ -187,15 +180,15 @@ func (s *Store) WriteLogPattern(ctx context.Context, pattern *logpattern_go_prot
 	if err != nil {
 		return fmt.Errorf("encoding error: %v", err)
 	}
-	return s.Write(ctx, key, value)
+	return s.write(ctx, key, value)
 }
 
-// Scan implements part of the graphstore.Service interface.
+// ScanLogPattern scans all log pattern from the keyvalue DB.
 func (s *Store) ScanLogPattern(ctx context.Context, fn func(key, value []byte) error) error {
-	return s.Scan(ctx, logKeyPrefixBytes, fn)
+	return s.scan(ctx, logKeyPrefixBytes, fn)
 }
 
-// Write implements part of the GraphStore interface.
+// WriteLogCoverage used write coverage data into keyvalue DB.
 func (s *Store) WriteLogCoverage(ctx context.Context, coverage *logpattern_go_proto.Coverage) (err error) {
 	key, err := EncodeCoverageKey(coverage.Pos)
 	if err != nil {
@@ -206,16 +199,15 @@ func (s *Store) WriteLogCoverage(ctx context.Context, coverage *logpattern_go_pr
 	if err != nil {
 		return fmt.Errorf("encoding error: %v", err)
 	}
-	return s.Write(ctx, key, value)
+	return s.write(ctx, key, value)
 }
 
-// Scan implements part of the graphstore.Service interface.
+// ScanLogCoverage scans all log coverage from the keyvalue DB.
 func (s *Store) ScanLogCoverage(ctx context.Context, fn func(key, value []byte) error) error {
-	return s.Scan(ctx, coverageKeyPrefixBytes, fn)
+	return s.scan(ctx, coverageKeyPrefixBytes, fn)
 }
 
-// Write implements part of the GraphStore interface.
-func (s *Store) Write(ctx context.Context, key, value []byte) (err error) {
+func (s *Store) write(ctx context.Context, key, value []byte) (err error) {
 	wr, err := s.db.Writer(ctx)
 	if err != nil {
 		return fmt.Errorf("db writer error: %v", err)
@@ -233,8 +225,7 @@ func (s *Store) Write(ctx context.Context, key, value []byte) (err error) {
 	return nil
 }
 
-// Scan implements part of the graphstore.Service interface.
-func (s *Store) Scan(ctx context.Context, keyPrefix []byte, fn func(key, value []byte) error) error {
+func (s *Store) scan(ctx context.Context, keyPrefix []byte, fn func(key, value []byte) error) error {
 	iter, err := s.db.ScanPrefix(ctx, keyPrefix, &Options{})
 	if err != nil {
 		return fmt.Errorf("db seek error: %v", err)
@@ -262,19 +253,15 @@ const (
 	LogPatternKeyPrefix = "log:"
 	FunctionKeyPrefix   = "fn:"
 	CoverageKeyPrefix   = "cov:"
-	// keySep is used to separate the repo, position of an encoded Entry key
-	keySep    = '\n'
-	keySepStr = string(keySep)
 )
 
 var (
 	logKeyPrefixBytes      = []byte(LogPatternKeyPrefix)
 	functionKeyPrefixBytes = []byte(FunctionKeyPrefix)
 	coverageKeyPrefixBytes = []byte(CoverageKeyPrefix)
-	keySepBytes            = []byte{keySep}
 )
 
-// EncodeLogKey returns a canonical encoding of  entity key
+// EncodeLogKey returns a canonical encoding of log pattern key
 func EncodeLogKey(pos *logpattern_go_proto.Position) ([]byte, error) {
 	if pos == nil {
 		return nil, errors.New("invalid position: missing position for key encoding")
@@ -291,7 +278,7 @@ func EncodeLogKey(pos *logpattern_go_proto.Position) ([]byte, error) {
 	}, nil), nil
 }
 
-// EncodeLogKey returns a canonical encoding of  entity key
+// EncodeLogKey returns a canonical encoding of coverage data key
 func EncodeCoverageKey(pos *logpattern_go_proto.Position) ([]byte, error) {
 	if pos == nil {
 		return nil, errors.New("invalid position: missing position for key encoding")

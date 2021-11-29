@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/build"
 	"strings"
+	"sync"
 )
 
 // PackageCompiler helps to compile package, the analysis algorithm can be run on the compiled package
@@ -16,15 +17,20 @@ import (
 //  pkg.RunAnalyze(Analyzer)
 //  it is not concurrency safe
 type PackageCompiler struct {
-	ctx            build.Context
-	compliantCache map[string]*PackageCompilation // packageComplation.importPath -> packageComplation
+	ctx build.Context
+
+	compliantCache struct {
+		sync.RWMutex
+		set map[string]*PackageCompilation // packageCompilaion.importPath -> packageCompilaion
+	}
 }
 
 func NewPackageComplier(ctx build.Context) *PackageCompiler {
-	return &PackageCompiler{
-		ctx:            ctx,
-		compliantCache: make(map[string]*PackageCompilation),
+	p := &PackageCompiler{
+		ctx: ctx,
 	}
+	p.compliantCache.set = make(map[string]*PackageCompilation)
+	return p
 }
 
 // Compile compile the package, return a compiled PackageCompilation that can run analysis
@@ -60,19 +66,16 @@ func (pc *PackageCompiler) importPackage(importPath string) (*PackageCompilation
 		}
 
 		pkgImportPatch := pkg.ImportPath
-		_, ok := pc.compliantCache[pkgImportPatch]
-		if !ok {
-			pc.compliantCache[pkgImportPatch] = NewPackageCompilation(pkg.buildPackage(), pkg.DepOnly, pc.importDependPkg)
-		}
+		pc.SetCompliantOnIgnore(pkgImportPatch, NewPackageCompilation(pkg.buildPackage(), pkg.DepOnly, pc.importDependPkg))
 	}
 
-	return pc.compliantCache[importPath], nil
+	return pc.GetCompliant(importPath), nil
 }
 
 // importDependPkg helps to import dependency package, return a packageCompilation(depend-only)
 func (pc *PackageCompiler) importDependPkg(importPath string, pkgBaseDir string) (*PackageCompilation, error) {
 	// firstly find in cache
-	if pkg := pc.compliantCache[importPath]; pkg != nil {
+	if pkg := pc.GetCompliant(importPath); pkg != nil {
 		return pkg.Clone(), nil
 	}
 
@@ -83,7 +86,26 @@ func (pc *PackageCompiler) importDependPkg(importPath string, pkgBaseDir string)
 	}
 
 	pkg := NewPackageCompilation(bp, true, pc.importDependPkg)
-	pc.compliantCache[bp.ImportPath] = pkg
+	pc.SetCompliantOnIgnore(importPath, pkg)
 
 	return pkg.Clone(), nil
+}
+
+func (pc *PackageCompiler) GetCompliant(importPath string) *PackageCompilation {
+	var compilation *PackageCompilation
+	pc.compliantCache.RLock()
+	if c, ok := pc.compliantCache.set[importPath]; ok {
+		compilation = c.Clone()
+	}
+	pc.compliantCache.RUnlock()
+	return compilation
+}
+
+// if compilation exists, ignore to set it
+func (pc *PackageCompiler) SetCompliantOnIgnore(importPath string, compilation *PackageCompilation) {
+	pc.compliantCache.Lock()
+	if _, ok := pc.compliantCache.set[importPath]; !ok {
+		pc.compliantCache.set[importPath] = compilation
+	}
+	pc.compliantCache.Unlock()
 }

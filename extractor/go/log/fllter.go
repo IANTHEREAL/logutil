@@ -2,12 +2,13 @@ package log_extractor
 
 import "log"
 
-// LogPatternRule is used to filter log
-// the log pattern returned by filter.Filter() can definitely
-// match the specified log level or signature (log keyword)
+// LogPatternRule is used to filter log printing pattern in the code,
+// which is referred to as log pattern.
+// The log pattern returned by filter.Filter() can definitely
+// has the specified log level or signature (log keyword)
 // usage:
-// LogPatternRule.Level = ["error"] will be filter ERROR level log
-// LogPatternRule.Signature = ["network disconnect"] will be filter log contains ""network disconnect""
+// LogPatternRule.Level = ["error", "warn"] will filter error or warn level log print pattern
+// LogPatternRule.Signature = ["network disconnect"] will filter log contains "network disconnect"
 type LogPatternRule struct {
 	Level     []string
 	Signature []string
@@ -17,6 +18,9 @@ func (rule *LogPatternRule) Match(level string, message string) bool {
 	if rule == nil {
 		return true
 	}
+
+	// if there are no log level rule， return true；
+	// otherwise return the matched result
 	levelMatched := true
 
 	if len(rule.Level) > 0 {
@@ -28,32 +32,29 @@ func (rule *LogPatternRule) Match(level string, message string) bool {
 		levelMatched = false
 	}
 
+	// TODO: add signatures matching algorithm
+
 	return levelMatched
 }
 
-// LogPkgFilter designed to distinguish log levels according to the log package used,
-// e.g. the log.Errorf log.Warn method of the zap log package
-type LogPkgFilter interface {
-	Filter(pkgName, fnName, logMesage string, opt *LogPatternRule) (string, bool)
+// LogPkgExtract designed to extract log printing level according to the log package used,
+// e.g. error level using Errorf() method of the zap log package
+type LogPkgExtract interface {
+	Filter(pkgName, fnName, logMesage string) (string, bool)
 }
 
-var filterHub = make(map[string]LogPkgFilter)
+var filterHub = make(map[string]LogPkgExtract)
 
-func RegisterLogPkgFilter(pkgPath string, filter LogPkgFilter) {
-	if _, exist := filterHub[pkgPath]; exist {
-		log.Fatalf("log pkg pattern filter hub for kind %s already exists", pkgPath)
+func RegisterLogPkgFilter(pkg string, filter LogPkgExtract) {
+	if _, exist := filterHub[pkg]; exist {
+		log.Fatalf("log pattern filter hub for kind %s already exists", pkg)
 	}
-	filterHub[pkgPath] = filter
+	filterHub[pkg] = filter
 }
 
 func init() {
-	RegisterLogPkgFilter("log", &officalLog{})
-	RegisterLogPkgFilter("zap", &zapLog{})
-}
-
-// FilterHub accpets various log filtering methods, and try them one by one in
-type FilterHub struct {
-	logPkgFilterMap map[string]LogPkgFilter
+	RegisterLogPkgFilter("log", &logPkg{})
+	RegisterLogPkgFilter("zap", &zapLogPkg{})
 }
 
 // Filter used to determine whether the log pattern matched filter rule
@@ -67,40 +68,71 @@ func NewFilter(rule *LogPatternRule) *Filter {
 
 // Filter used to log packaga/function name, and log format data to compute match result
 func (f *Filter) Filter(pkgName, fnName, logMesage string) (string, bool) {
+	//
 	for _, filter := range filterHub {
-		if level, isLog := filter.Filter(pkgName, fnName, logMesage, f.filterRule); isLog {
+		if level, matched := filter.Filter(pkgName, fnName, logMesage); matched {
 			//log.Printf("mateched log %s %s %s", pkgName, fnName, logMesage)
-			return level, true
+			if f.filterRule.Match(level, logMesage) {
+				return level, true
+			}
 		}
 	}
 
 	return "", false
 }
 
-type officalLog struct{}
+type logPkg struct{}
 
-func (l *officalLog) Filter(pkgName, fnName, logMesage string, rule *LogPatternRule) (string, bool) {
+func (l *logPkg) Filter(pkgName, fnName, logMesage string) (string, bool) {
 	level, matched := "", false
 
-	if pkgName == "log" && (fnName == "ErrorFilterContextCanceled" || fnName == "Error" || fnName == "Errorf") {
+	if pkgName != "log" {
+		return level, matched
+	}
+
+	if fnName == "ErrorFilterContextCanceled" || fnName == "Error" || fnName == "Errorf" {
 		level, matched = "error", true
 	}
 
-	if pkgName == "log" && (fnName == "Printf" || fnName == "Print") {
+	if fnName == "Warnf" || fnName == "Warn" {
+		level, matched = "warn", true
+	}
+
+	if fnName == "Fatalf" || fnName == "Fatal" {
+		level, matched = "warn", true
+	}
+
+	if fnName == "Printf" || fnName == "Print" || fnName == "Infof" || fnName == "Info" {
 		level, matched = "info", true
 	}
 
-	return level, matched && rule.Match(level, logMesage)
+	return level, matched
 }
 
-type zapLog struct{}
+type zapLogPkg struct{}
 
-func (z *zapLog) Filter(pkgName, fnName, logMesage string, rule *LogPatternRule) (string, bool) {
+func (z *zapLogPkg) Filter(pkgName, fnName, logMesage string) (string, bool) {
 	level, matched := "", false
 
-	if pkgName == "zap" && (fnName == "Errorf" || fnName == "Error" || fnName == "ErrorFilterContextCanceled") {
+	if pkgName != "zap" {
+		return level, matched
+	}
+
+	if fnName == "Errorf" || fnName == "Error" {
 		level, matched = "error", true
 	}
 
-	return level, matched && rule.Match(level, logMesage)
+	if fnName == "Warnf" || fnName == "Warn" {
+		level, matched = "warn", true
+	}
+
+	if fnName == "Fatalf" || fnName == "Fatal" {
+		level, matched = "warn", true
+	}
+
+	if fnName == "Infof" || fnName == "Info" {
+		level, matched = "info", true
+	}
+
+	return level, matched
 }

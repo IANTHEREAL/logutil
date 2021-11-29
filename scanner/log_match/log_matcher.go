@@ -1,9 +1,10 @@
-package log_scanner
+package matcher
 
 import (
 	"context"
 
 	logpattern_go_proto "github.com/IANTHEREAL/logutil/proto"
+	scanner "github.com/IANTHEREAL/logutil/scanner/log_scan"
 	"github.com/IANTHEREAL/logutil/storage/keyvalue"
 )
 
@@ -30,17 +31,17 @@ func MockPatternMatcher(logs []*logpattern_go_proto.LogPattern) (*PatternMatcher
 	return ps, nil
 }
 
-func NewPatternMatcher(repo string, store *keyvalue.Store) (*PatternMatcher, error) {
+func NewPatternMatcher(store *keyvalue.Store) (*PatternMatcher, error) {
 	ps := &PatternMatcher{
 		trie:  NewPatternTrie(),
 		store: store,
 	}
 
-	err := ps.load(context.Background(), repo)
+	err := ps.load(context.Background())
 	return ps, err
 }
 
-func (p *PatternMatcher) load(ctx context.Context, repo string) error {
+func (p *PatternMatcher) load(ctx context.Context) error {
 	return p.store.ScanLogPattern(ctx, func(_, value []byte) error {
 		lp := &logpattern_go_proto.LogPattern{}
 		err := lp.Unmarshal(value)
@@ -60,15 +61,10 @@ func (p *PatternMatcher) load(ctx context.Context, repo string) error {
 	})
 }
 
-func (p *PatternMatcher) Match(lp *Log) *MatchedResult {
+func (p *PatternMatcher) Match(lp *scanner.Log) *MatchedResult {
 	if lp == nil {
 		return nil
 	}
-
-	/*if strings.ToLower(string(lp.Level)) == "error" {
-
-		log.Printf("log %s", lp)
-	}*/
 
 	return p.trie.Match(string(lp.Msg), string(lp.Level), string(lp.Position))
 }

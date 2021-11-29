@@ -63,3 +63,16 @@ message Coverage {
    // the count to be covered in every file
    map<string, int32> cov_count_by_log = 3;
 }
+
+// An UnknowLogPattern represents a log pattern that not captured by log extractor
+// but exits in log
+message UnknowLogPattern {
+   // log position
+   Position pos = 1;
+   // log level "info,warn,error" if has
+   string level = 2;
+   // total count to be covered
+   int32 cov_count = 3;
+   // the count to be covered in every file
+   map<string, int32> cov_count_by_log = 4;
+}

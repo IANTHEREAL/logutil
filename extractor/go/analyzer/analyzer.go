@@ -34,11 +34,14 @@ func (ai *logAanalyzer) Run(file *ast.File, helper *AstHelper) {
 	ast.Walk(newASTVisitor(func(node ast.Node, stack stackFunc) bool {
 		switch n := node.(type) {
 		case *ast.FuncDecl:
+			// cache the function to help find call context
 			ai.visitFuncDecl(n, stack, helper)
 		case *ast.FuncLit:
+			// cache the function to help find call context
 			ai.visitFuncLit(n, stack, helper)
 		case *ast.BasicLit:
-			ai.filter(n, stack, helper)
+			// try to filter log pattern
+			ai.filterLog(n, stack, helper)
 		}
 		return true
 	}), file)
@@ -47,7 +50,7 @@ func (ai *logAanalyzer) Run(file *ast.File, helper *AstHelper) {
 func (ai *logAanalyzer) SetupOutput() <-chan proto.Message {
 	ai.MarkDone()
 
-	ai.logChan = make(chan proto.Message, 10000000)
+	ai.logChan = make(chan proto.Message, 256)
 	return ai.logChan
 }
 
@@ -57,7 +60,7 @@ func (ai *logAanalyzer) MarkDone() {
 	}
 }
 
-func (ai *logAanalyzer) filter(id *ast.BasicLit, stack stackFunc, helper *AstHelper) {
+func (ai *logAanalyzer) filterLog(id *ast.BasicLit, stack stackFunc, helper *AstHelper) {
 	switch p := stack(1).(type) {
 	case *ast.Ident, *ast.SelectorExpr:
 	case *ast.CallExpr:
@@ -68,7 +71,7 @@ func (ai *logAanalyzer) filter(id *ast.BasicLit, stack stackFunc, helper *AstHel
 }
 
 func (ai *logAanalyzer) matchLog(l *ast.BasicLit, fn *ast.Ident, stack stackFunc, helper *AstHelper) {
-	//log.Printf("match log %+v", l)
+	// get the log print
 	obj := helper.GetTypeUsed(fn)
 	if obj == nil {
 		// Defining identifiers are handled by their parent nodes.
@@ -82,12 +85,8 @@ func (ai *logAanalyzer) matchLog(l *ast.BasicLit, fn *ast.Ident, stack stackFunc
 		fnPkg := obj.Pkg().Name()
 		helper.GetPos(obj.Pos())
 
-		/*	if strings.Contains(fnName, "Error") {
-			if ((fnPkg == "fmt" || fnPkg == "status") && fnName == "Errorf") || (fnPkg == "msgp" && fnName == "WrapError") || (fnPkg == "errors" && fnName == "Errorf") || (fnPkg == "log" && fnName == "Errorf") {
-
-			} else {
-				log.Printf("fnPkg %s %s", fnPkg, fnName)
-			}
+		/*if strings.Contains(fnName, "Error") {
+			log.Printf("fnPkg %s %s %+v", fnPkg, fnName, obj.Type().(*types.Signature).Recv().Type())
 		}*/
 
 		if level, ok := ai.fn(fnPkg, fnName, l.Value); ok {
@@ -120,7 +119,7 @@ func (ai *logAanalyzer) matchLog(l *ast.BasicLit, fn *ast.Ident, stack stackFunc
 	//log.Printf("done match log %+v", l)
 }
 
-// visitFuncDecl handles function and method declarations and their parameters.
+// visitFuncDecl handles function and method declarations.
 func (ai *logAanalyzer) visitFuncDecl(decl *ast.FuncDecl, stack stackFunc, helper *AstHelper) {
 	// Get the type of this function, even if its name is blank.
 	obj, _ := helper.GetTypeDef(decl.Name).(*types.Func)
@@ -129,9 +128,7 @@ func (ai *logAanalyzer) visitFuncDecl(decl *ast.FuncDecl, stack stackFunc, helpe
 	}
 }
 
-// visitFuncLit handles function literals and their parameters.  The signature
-// for a function literal is named relative to the signature of its parent
-// function, or the file scope if the literal is at the top level.
+// visitFuncLit handles function literals.
 func (ai *logAanalyzer) visitFuncLit(flit *ast.FuncLit, stack stackFunc, helper *AstHelper) {
 	fi, _ := ai.callContext(stack, helper)
 	if fi == "" {
