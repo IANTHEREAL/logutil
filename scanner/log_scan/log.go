@@ -11,7 +11,7 @@ type Log struct {
 	Time     string
 	Level    string
 	Position string
-	Msg      []byte
+	Msg      string
 }
 
 func (l *Log) String() string {
@@ -53,6 +53,7 @@ func (l *LogScanner) Scan() (*Log, error) {
 	}
 
 	lg, err := l.parser.Parse(line)
+
 	for err == ErrLogIncomplete {
 		// try to find a complete log
 		lg, line, err = l.scanLog(line)

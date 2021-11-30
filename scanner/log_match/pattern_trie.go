@@ -2,8 +2,6 @@ package matcher
 
 import (
 	"errors"
-	"fmt"
-	"log"
 	"strings"
 	"sync"
 
@@ -36,14 +34,14 @@ type node struct {
 type item interface {
 	child() *node
 	setChild(*node)
-	getLogPattern() []*logpattern_go_proto.LogPattern
+	getLogPattern() map[string]*BriefPattern
 	setLogPattern(*logpattern_go_proto.LogPattern)
 }
 
 type baseItem struct {
 	ch *node
 
-	pattern []*logpattern_go_proto.LogPattern
+	pattern map[string]*BriefPattern
 }
 
 func (i *baseItem) child() *node {
@@ -54,35 +52,31 @@ func (i *baseItem) setChild(c *node) {
 	i.ch = c
 }
 
-func (i *baseItem) getLogPattern() []*logpattern_go_proto.LogPattern {
+func (i *baseItem) getLogPattern() map[string]*BriefPattern {
 	return i.pattern
 }
 
 func (i *baseItem) setLogPattern(pattern *logpattern_go_proto.LogPattern) {
-	/*for _, p := range i.pattern {
-		if p.Pos == pattern.Pos {
-			return
-		}
-	}*/
-	if pattern.Signature[0] == "\"unit process error\"" {
-		log.Printf("signatures %s %+v", pattern.Signature[0], pattern.Pos)
+	if i.pattern == nil {
+		i.pattern = make(map[string]*BriefPattern)
 	}
-	i.pattern = append(i.pattern, pattern)
+	bp := NewBriefPattern(pattern)
+	i.pattern[bp.ID()] = bp
 }
 
 func newNode() *node {
 	return &node{characters: make(map[byte]item)}
 }
 
-// NewTrieSelector returns a trie Selector
+// NewPatternTrie returns a trie pattern matcher
 func NewPatternTrie() *patternTrie {
 	return &patternTrie{root: newNode()}
 }
 
-// Insert implements Selector's interface.
+// Insert insers a pattern signature as key and the corresponding log pattern
 func (t *patternTrie) Insert(key string, pattern *logpattern_go_proto.LogPattern) error {
 	if pattern == nil {
-		return errors.New("Nil log pattern")
+		return errors.New("nil log pattern")
 	}
 
 	t.Lock()
@@ -92,7 +86,7 @@ func (t *patternTrie) Insert(key string, pattern *logpattern_go_proto.LogPattern
 	return nil
 }
 
-// if rule is nil, just extract nodes
+// insert builds a  trie, and the construction logic will replace the format symbol in the key, such as %s by asterisk(*)
 func (t *patternTrie) insert(root *node, key string, pattern *logpattern_go_proto.LogPattern) bool {
 	var (
 		n      = root
@@ -113,17 +107,17 @@ func (t *patternTrie) insert(root *node, key string, pattern *logpattern_go_prot
 		case question:
 			entity = n.question
 		default:
-			entity = n.characters[key[i]]
+			entity = n.characters[b]
 		}
 		if entity == nil {
 			entity = &baseItem{}
-			switch key[i] {
+			switch b {
 			case asterisk:
 				n.asterisk = entity
 			case question:
 				n.question = entity
 			default:
-				n.characters[key[i]] = entity
+				n.characters[b] = entity
 			}
 		}
 		if entity.child() == nil {
@@ -140,9 +134,9 @@ func (t *patternTrie) insert(root *node, key string, pattern *logpattern_go_prot
 	return false
 }
 
-// Match implements Selector's interface.
+// Match looks for all matching patterns in trie and returns them in MatchResult.
+// One log may match multiple patterns, which is related to the uniqueness of log data
 func (t *patternTrie) Match(key, level, position string) *MatchedResult {
-	// find matched rules
 	if t == nil {
 		return nil
 	}
@@ -154,8 +148,6 @@ func (t *patternTrie) Match(key, level, position string) *MatchedResult {
 		LogLevel: level,
 		Position: position,
 	})
-
-	//log.Printf("%s %s %s", key, level, position)
 
 	t.matchNode(t.root, key, res)
 	return res
@@ -172,8 +164,12 @@ func (t *patternTrie) matchNode(n *node, key string, res *MatchedResult) {
 	)
 	for i := range key {
 		if n.asterisk != nil {
+			//log.Printf("%d %s %+v", i, key, n.asterisk.getLogPattern())
 			res.append(n.asterisk)
-			t.matchNode(n.asterisk.child(), key[i:], res)
+			for index := i; index < len(key); index++ {
+				t.matchNode(n.asterisk.child(), key[index:], res)
+				t.matchNode(n.asterisk.child(), key[index+1:], res)
+			}
 		}
 
 		if n.question != nil {
@@ -207,12 +203,13 @@ type MatchedOptions struct {
 
 type MatchedResult struct {
 	options  *MatchedOptions
-	Patterns []*logpattern_go_proto.LogPattern
+	Patterns map[string]*BriefPattern
 }
 
 func newMatchedResult(options *MatchedOptions) *MatchedResult {
 	return &MatchedResult{
-		options: options,
+		options:  options,
+		Patterns: make(map[string]*BriefPattern),
 	}
 }
 
@@ -221,21 +218,19 @@ func (res *MatchedResult) empty() bool {
 }
 
 func (res *MatchedResult) append(entity item) {
-
 	patterns := entity.getLogPattern()
 	opt := res.options
 	for _, pattern := range patterns {
-		patternPos := pattern.GetPos()
-		filePos := fmt.Sprintf("%s:%d", patternPos.FilePath, patternPos.LineNumber)
-
-		if pattern != nil && opt != nil &&
-			(opt.LogLevel == "" || strings.ToLower(opt.LogLevel) == strings.ToLower(pattern.Level)) &&
-			(opt.Position == "" || strings.HasSuffix(filePos, opt.Position)) {
-			res.Patterns = append(res.Patterns, pattern)
+		if opt != nil &&
+			(opt.LogLevel == "" || strings.ToLower(opt.LogLevel) == strings.ToLower(pattern.matchedLevel)) &&
+			(opt.Position == "" || strings.ToLower(opt.Position) == strings.ToLower(pattern.matchedPos)) {
+			res.Patterns[pattern.ID()] = pattern
 		}
 	}
 }
 
+// repalceFormatPlaceholder replaces the format symbol in the key, such as %s by asterisk(*)
+// `%`` Has been encountered before calling this function, `str` is characters after `%`
 func repalceFormatPlaceholder(str string) (int, byte) {
 	if len(str) == 0 {
 		return 0, asterisk

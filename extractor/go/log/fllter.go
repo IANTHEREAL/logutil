@@ -21,20 +21,18 @@ func (rule *LogPatternRule) Match(level string, message string) bool {
 
 	// if there are no log level rule， return true；
 	// otherwise return the matched result
-	levelMatched := true
-
 	if len(rule.Level) > 0 {
 		for _, l := range rule.Level {
 			if l == level {
-				levelMatched = true
+				return true
 			}
 		}
-		levelMatched = false
+		return false
 	}
 
 	// TODO: add signatures matching algorithm
 
-	return levelMatched
+	return false
 }
 
 // LogPkgExtract designed to extract log printing level according to the log package used,
@@ -63,15 +61,18 @@ type Filter struct {
 }
 
 func NewFilter(rule *LogPatternRule) *Filter {
+	if rule == nil {
+		rule = &LogPatternRule{
+			Level: []string{"error"},
+		}
+	}
 	return &Filter{filterRule: rule}
 }
 
 // Filter used to log packaga/function name, and log format data to compute match result
 func (f *Filter) Filter(pkgName, fnName, logMesage string) (string, bool) {
-	//
 	for _, filter := range filterHub {
 		if level, matched := filter.Filter(pkgName, fnName, logMesage); matched {
-			//log.Printf("mateched log %s %s %s", pkgName, fnName, logMesage)
 			if f.filterRule.Match(level, logMesage) {
 				return level, true
 			}
@@ -92,17 +93,11 @@ func (l *logPkg) Filter(pkgName, fnName, logMesage string) (string, bool) {
 
 	if fnName == "ErrorFilterContextCanceled" || fnName == "Error" || fnName == "Errorf" {
 		level, matched = "error", true
-	}
-
-	if fnName == "Warnf" || fnName == "Warn" {
+	} else if fnName == "Warnf" || fnName == "Warn" {
 		level, matched = "warn", true
-	}
-
-	if fnName == "Fatalf" || fnName == "Fatal" {
-		level, matched = "warn", true
-	}
-
-	if fnName == "Printf" || fnName == "Print" || fnName == "Infof" || fnName == "Info" {
+	} else if fnName == "Fatalf" || fnName == "Fatal" {
+		level, matched = "fatal", true
+	} else if fnName == "Printf" || fnName == "Print" || fnName == "Infof" || fnName == "Info" {
 		level, matched = "info", true
 	}
 
@@ -120,17 +115,11 @@ func (z *zapLogPkg) Filter(pkgName, fnName, logMesage string) (string, bool) {
 
 	if fnName == "Errorf" || fnName == "Error" {
 		level, matched = "error", true
-	}
-
-	if fnName == "Warnf" || fnName == "Warn" {
+	} else if fnName == "Warnf" || fnName == "Warn" {
 		level, matched = "warn", true
-	}
-
-	if fnName == "Fatalf" || fnName == "Fatal" {
-		level, matched = "warn", true
-	}
-
-	if fnName == "Infof" || fnName == "Info" {
+	} else if fnName == "Fatalf" || fnName == "Fatal" {
+		level, matched = "fatal", true
+	} else if fnName == "Infof" || fnName == "Info" {
 		level, matched = "info", true
 	}
 

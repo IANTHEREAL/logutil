@@ -26,7 +26,7 @@ func RegisterLogParser(name string, l LogParser) {
 }
 
 func init() {
-	RegisterLogParser("zap", &zapLogParser{})
+	RegisterLogParser("zap", newZapLogParser())
 }
 
 // LogParser defines a log parsing interface,
@@ -68,7 +68,7 @@ type ZapLog struct {
 	*Log
 }
 
-func (z *ZapLog) isVaildLogEvel(level string) bool {
+func isVaildLogEvel(level string) bool {
 	levelToLow := strings.ToLower(level)
 	return levelToLow == "error" || levelToLow == "info" || levelToLow == "warn" || levelToLow == "fatal"
 }
@@ -104,7 +104,7 @@ func (z *ZapLog) Extract(line []byte) error {
 	pos = bytes.IndexByte(z.Rest, ']')
 	if pos >= 0 {
 		z.Level = string(z.Rest[:pos])
-		if !z.isVaildLogEvel(z.Level) {
+		if !isVaildLogEvel(z.Level) {
 			return ErrZapLog
 		}
 		z.Rest = z.Rest[pos+1:]
@@ -138,7 +138,7 @@ func (z *ZapLog) Extract(line []byte) error {
 	// Take until ']' as Msg(string)
 	pos = bytes.IndexByte(z.Rest, ']')
 	if pos >= 0 {
-		z.Msg = z.Rest[:pos]
+		z.Msg = string(z.Rest[:pos])
 		z.Rest = z.Rest[pos+1:]
 	} else {
 		return ErrLogIncomplete

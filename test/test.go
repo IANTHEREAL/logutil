@@ -26,9 +26,9 @@ func main() {
 
 	store := keyvalue.NewLogPatternStore(db)
 
-	testReopoert(store)
+	//testReopoert(store)
 	//testMatcher(store)
-	//testPrintLogPattern(store)
+	testPrintLogPattern(store)
 	//testPrintCoverage(store)
 	return
 
@@ -104,6 +104,7 @@ func testPrintLogPattern(store *keyvalue.Store) {
 		if err != nil {
 			log.Printf("Unmarshal log %s failed %v", lp, err)
 		}
+
 		log.Printf("result log %s", lp)
 		count++
 		return err
@@ -141,7 +142,7 @@ func testReopoert(store *keyvalue.Store) {
 }
 
 func testMatcher(store *keyvalue.Store) {
-	p, err := log_scanner.NewPipeline(store, "github.com/pingcap/ticdc/dm", []string{
+	p, err := log_scanner.NewLogProcessor(store, []string{
 		"/Users/ianz/Work/go/src/github.com/pingcap/dm/log/dm-master-0.log",
 		"/Users/ianz/Work/go/src/github.com/pingcap/dm/log/dm-master-1.log",
 		"/Users/ianz/Work/go/src/github.com/pingcap/dm/log/dm-master-2.log",
@@ -154,7 +155,7 @@ func testMatcher(store *keyvalue.Store) {
 		log.Fatalf("new scanner pipeline failed %s", err)
 	}
 
-	err = p.Run()
+	err = p.Run(context.Background())
 	if err != nil {
 		log.Fatalf("scanner run %s", err)
 	}

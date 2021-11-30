@@ -2,6 +2,7 @@ package util
 
 import (
 	"errors"
+	"fmt"
 	"go/build"
 	"regexp"
 	"strings"
@@ -81,4 +82,9 @@ func expand(match map[string]string, s string) string {
 		s = strings.Replace(s, "{"+k+"}", v, -1)
 	}
 	return s
+}
+
+// PosToStr converts *logpattern_go_proto.Position into a string
+func PosToStr(pos *proto.Position) string {
+	return fmt.Sprintf("%s:%s:%d:%d", pos.PackagePath.Repo, pos.FilePath, pos.LineNumber, pos.ColumnOffset)
 }

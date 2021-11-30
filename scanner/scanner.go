@@ -127,9 +127,11 @@ func (l *assemLine) run(ctx context.Context) error {
 
 // runLogScan scans log and send log to pipeline
 func (l *assemLine) runLogScan(ctx context.Context, pipeline *Pipeline) error {
-	lg, err := l.scanner.Scan()
-	for err != io.EOF {
-		if err != nil {
+	for {
+		lg, err := l.scanner.Scan()
+		if err == io.EOF {
+			return nil
+		} else if err != nil {
 			return err
 		}
 
@@ -137,9 +139,7 @@ func (l *assemLine) runLogScan(ctx context.Context, pipeline *Pipeline) error {
 		if err != nil {
 			return err
 		}
-		lg, err = l.scanner.Scan()
 	}
-	return nil
 }
 
 // runMathAndRecord recieve log from pipeline and match them with log pattern，then record the coverage
@@ -153,11 +153,11 @@ func (l *assemLine) runMathAndRecord(ctx context.Context, pipeline *Pipeline) er
 		}
 
 		res := l.matcher.Match(payload.log)
-		if res == nil || len(res.Patterns) == 0 {
+		if (res == nil || len(res.Patterns) == 0) && payload.log.Level == "error" {
 			l.unknowLogs.Record(payload.log)
 		} else {
 			for _, lp := range res.Patterns {
-				l.coverager.Compute(payload.log, lp)
+				l.coverager.Record(payload.log, lp)
 			}
 		}
 	}

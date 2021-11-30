@@ -5,13 +5,14 @@ import (
 	"sync"
 
 	logpattern_go_proto "github.com/IANTHEREAL/logutil/proto"
+	matcher "github.com/IANTHEREAL/logutil/scanner/log_match"
 	scanner "github.com/IANTHEREAL/logutil/scanner/log_scan"
 	"github.com/IANTHEREAL/logutil/storage/keyvalue"
 )
 
 type Coverager struct {
 	sync.RWMutex
-	logCoverageCount map[*logpattern_go_proto.Position]*logpattern_go_proto.Coverage
+	logCoverageCount map[string]*logpattern_go_proto.Coverage
 
 	store *keyvalue.Store
 }
@@ -19,19 +20,19 @@ type Coverager struct {
 func NewCoverager(store *keyvalue.Store) *Coverager {
 	return &Coverager{
 		store:            store,
-		logCoverageCount: make(map[*logpattern_go_proto.Position]*logpattern_go_proto.Coverage),
+		logCoverageCount: make(map[string]*logpattern_go_proto.Coverage),
 	}
 }
 
-func (c *Coverager) Compute(l *scanner.Log, pattern *logpattern_go_proto.LogPattern) {
+func (c *Coverager) Record(l *scanner.Log, pattern *matcher.BriefPattern) {
 	c.Lock()
-	cov := c.logCoverageCount[pattern.Pos]
+	cov := c.logCoverageCount[pattern.ID()]
 	if cov == nil {
 		cov = &logpattern_go_proto.Coverage{
-			Pos:           pattern.Pos,
+			Pos:           pattern.Pattern().GetPos(),
 			CovCountByLog: make(map[string]int32),
 		}
-		c.logCoverageCount[pattern.Pos] = cov
+		c.logCoverageCount[pattern.ID()] = cov
 	}
 
 	cov.CovCount = cov.CovCount + 1

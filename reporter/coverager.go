@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/IANTHEREAL/logutil/pkg/util"
 	logpattern_go_proto "github.com/IANTHEREAL/logutil/proto"
 	"github.com/IANTHEREAL/logutil/storage/keyvalue"
 )
@@ -51,10 +52,6 @@ func (c *Coverager) OverallCoverage() (int, int) {
 	return c.Total, c.Cov
 }
 
-func posToStr(pos *logpattern_go_proto.Position) string {
-	return fmt.Sprintf("%s:%s:%d:%d", pos.PackagePath.Repo, pos.FilePath, pos.LineNumber, pos.ColumnOffset)
-}
-
 func (c *Coverager) load(ctx context.Context) error {
 	err := c.store.ScanLogPattern(ctx, func(_, value []byte) error {
 		lp := &logpattern_go_proto.LogPattern{}
@@ -63,7 +60,7 @@ func (c *Coverager) load(ctx context.Context) error {
 			return err
 		}
 
-		path := posToStr(lp.Pos)
+		path := util.PosToStr(lp.Pos)
 		if d := c.Details[path]; d == nil {
 			c.Total++
 			c.Details[path] = &LogDetail{
@@ -84,7 +81,7 @@ func (c *Coverager) load(ctx context.Context) error {
 			return err
 		}
 
-		path := posToStr(lp.Pos)
+		path := util.PosToStr(lp.Pos)
 		if d := c.Details[path]; d != nil {
 			c.Cov++
 			d.Coverage = lp
