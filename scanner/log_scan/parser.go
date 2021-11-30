@@ -81,7 +81,7 @@ func (z *ZapLog) Extract(line []byte) error {
 	if len(z.Rest) >= 1 && z.Rest[0] == '[' {
 		z.Rest = z.Rest[1:]
 	} else {
-		return ErrLogIncomplete
+		return ErrZapLog
 	}
 
 	// Take until ']' as Time(string)
@@ -97,7 +97,7 @@ func (z *ZapLog) Extract(line []byte) error {
 	if bytes.HasPrefix(z.Rest, constSpaceLsbrck) {
 		z.Rest = z.Rest[len(constSpaceLsbrck):]
 	} else {
-		return ErrLogIncomplete
+		return ErrZapLog
 	}
 
 	// Take until ']' as Level(string)
@@ -116,7 +116,7 @@ func (z *ZapLog) Extract(line []byte) error {
 	if bytes.HasPrefix(z.Rest, constSpaceLsbrck) {
 		z.Rest = z.Rest[len(constSpaceLsbrck):]
 	} else {
-		return ErrLogIncomplete
+		return ErrZapLog
 	}
 
 	// Take until ']' as Position(string)
@@ -132,7 +132,7 @@ func (z *ZapLog) Extract(line []byte) error {
 	if bytes.HasPrefix(z.Rest, constSpaceLsbrck) {
 		z.Rest = z.Rest[len(constSpaceLsbrck):]
 	} else {
-		return ErrLogIncomplete
+		return ErrZapLog
 	}
 
 	// Take until ']' as Msg(string)

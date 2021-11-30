@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"fmt"
+	"io"
 	"log"
 )
 
@@ -53,14 +54,18 @@ func (l *LogScanner) Scan() (*Log, error) {
 	}
 
 	lg, err := l.parser.Parse(line)
+	for err != nil {
+		if err == io.EOF {
+			return nil, err
+		}
 
-	for err == ErrLogIncomplete {
+		if err != ErrLogIncomplete {
+			// skip line
+			log.Printf("[skip log]read log error %v: %s", err, line)
+			line = []byte{}
+		}
 		// try to find a complete log
 		lg, line, err = l.scanLog(line)
-	}
-	if err != nil {
-		log.Printf("read log error %v: %s", err, line)
-		return nil, err
 	}
 
 	lg.LogPath = l.logPath

@@ -30,6 +30,19 @@ func (t *testLogSuite) TestRead(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(slg.Position, DeepEquals, "main.go:71")
 
+	slg, err = ls.Scan()
+	c.Assert(err, IsNil)
+	c.Assert(slg.Position, DeepEquals, "source_worker.go:605")
+
+	_, err = ls.Scan()
+	c.Assert(err, Equals, io.EOF)
+
+	logs, _ = testGenerateInValidZapLogs()
+	ls.reader = newMockLogReader(logs)
+	slg, err = ls.Scan()
+	c.Assert(err, IsNil)
+	c.Assert(slg.Position, DeepEquals, "source_worker.go:605")
+
 	_, err = ls.Scan()
 	c.Assert(err, Equals, io.EOF)
 }

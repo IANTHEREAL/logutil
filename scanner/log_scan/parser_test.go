@@ -34,8 +34,8 @@ func (t *testParserSuite) TestSelectParser(c *C) {
 	}
 
 	// TODO: it's a bug, need to fix later
-	contents, _ = testGenerateSpecialZapLogs()
-	for _, content := range contents {
+	contents, errs := testGenerateSpecialZapLogs()
+	for index, content := range contents {
 		parser = nil
 		for _, p := range hub {
 			if p.IsSuitable([]byte(content)) {
@@ -43,18 +43,28 @@ func (t *testParserSuite) TestSelectParser(c *C) {
 			}
 		}
 
-		c.Assert(parser, IsNil)
+		if errs[index] != nil {
+			c.Assert(parser, IsNil)
+		} else {
+			c.Assert(parser, NotNil)
+			c.Assert(selectedParser, Equals, "zap")
+		}
 	}
 
-	contents, _ = testGenerateInValidZapLogs()
-	for _, content := range contents {
+	contents, errs = testGenerateInValidZapLogs()
+	for index, content := range contents {
 		parser = nil
 		for _, p := range hub {
 			if p.IsSuitable([]byte(content)) {
 				parser = p
 			}
 		}
-		c.Assert(parser, IsNil)
+		if errs[index] != nil {
+			c.Assert(parser, IsNil)
+		} else {
+			c.Assert(parser, NotNil)
+			c.Assert(selectedParser, Equals, "zap")
+		}
 	}
 }
 
@@ -96,8 +106,11 @@ func testGenerateSpecialZapLogs() ([]string, []error) {
 	return []string{
 		`[2021/11/18 23:20:53.596 +00:00] [INFO] [main.go:71] ["`,
 		`dm-worker`,
-		`config"="{\"name\":\"dm-worker-2\",\"log-level\":\"info\",\"log-file\":\"/log/dm-worker-2.log\",\"log-format\":\"text\",\"log-rotate\":\"\",\"join\":\"http://dm-master-0.dm-master.default:8261,http://dm-master-1.dm-master.default:8261,http://dm-master-2.dm-master.default:8261\",\"worker-addr\":\"0.0.0.0:8262\",\"advertise-addr\":\"dm-worker-2.dm-worker.default:8262\",\"config-file\":\"\",\"keepalive-ttl\":60,\"relay-keepalive-ttl\":1800,\"ssl-ca\":\"\",\"ssl-cert\":\"\",\"ssl-key\":\"\",\"cert-allowed-cn\":null}"]`,
-	}, []error{ErrLogIncomplete, ErrLogIncomplete, ErrLogIncomplete}
+		`config"="{\"name\":\"dm-worker-2\",\"log-level\":\"info\",\"log-file\":\"/log/dm-worker-2.log\",\"log-format\":\"text\",\"log-rotate\":\"\",\"join\":\"http://dm-master-0.dm-master.default:8261,http://dm-master-1.dm-master.default:8261,http://dm-master-2.dm-master.default:8261\",\"worker-addr\":\"0.0.0.0:8262\",\"advertise-addr\":\"dm-worker-2.dm-worker.default:8262\",\"config-file\":\"\",\"keepalive-ttl\":60,\"relay-keepalive-ttl\":1800,\"ssl-ca\":\"\",\"ssl-cert\":\"\",\"ssl-key\":\"\",\"cert-allowed-cn\":null}"][ xxx`,
+		`xxxx][yyyyy`,
+		`][zzzz]`,
+		`[2021/11/18 23:21:56.901 +00:00] [ERROR] [source_worker.go:605] ["failed to update source status"] [component="worker controller"]`,
+	}, []error{ErrLogIncomplete, ErrZapLog, ErrZapLog, ErrZapLog, ErrZapLog, nil}
 }
 
 func testGenerateInValidZapLogs() ([]string, []error) {
@@ -107,5 +120,6 @@ func testGenerateInValidZapLogs() ([]string, []error) {
 		`[2021/11/18 23:20:53.596 +00:00] [INFO] xxx`,
 		`[2021/11/18 23:20:53.596 +00:00] xxx`,
 		`xxxxx`,
-	}, []error{ErrZapLog, ErrLogIncomplete, ErrLogIncomplete, ErrLogIncomplete, ErrLogIncomplete}
+		`[2021/11/18 23:21:56.901 +00:00] [ERROR] [source_worker.go:605] ["failed to update source status"] [component="worker controller"]`,
+	}, []error{ErrZapLog, ErrZapLog, ErrZapLog, ErrZapLog, ErrZapLog, nil}
 }
