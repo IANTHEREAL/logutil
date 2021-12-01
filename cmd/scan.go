@@ -20,8 +20,8 @@ func NewScanCmd() *cobra.Command {
 		Use:   "scan",
 		Short: "Scan program log files and calculate the log coverage result",
 		//Args:  cobra.MinimumNArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
-			ScanLog("/Users/ianz/Work/go/src/github.com/IANTHEREAL/logutil/tmp/", []string{
+		RunE: func(cmd *cobra.Command, args []string) error {
+			/*ScanLog("/Users/ianz/Work/go/src/github.com/IANTHEREAL/logutil/tmp/", []string{
 				"/Users/ianz/Work/go/src/github.com/pingcap/dm/log/dm-master-0.log",
 				"/Users/ianz/Work/go/src/github.com/pingcap/dm/log/dm-master-1.log",
 				"/Users/ianz/Work/go/src/github.com/pingcap/dm/log/dm-master-2.log",
@@ -29,7 +29,19 @@ func NewScanCmd() *cobra.Command {
 				"/Users/ianz/Work/go/src/github.com/pingcap/dm/log/dm-worker-1.log",
 				"/Users/ianz/Work/go/src/github.com/pingcap/dm/log/dm-worker-2.log",
 				"/Users/ianz/Work/go/src/github.com/pingcap/dm/log/dm-worker-3.log",
-			})
+			})*/
+			
+			if Exists(LogPattern) {
+				return fmt.Errorf("log pattern set doesn't exist")
+			}
+			
+			files := Strings.Split(LohFile, ",")
+			if len(files) <= 0 {
+				return fmt.Errorf("log files don't exist")
+			}
+			
+			ScanLog(LogPattern, files)
+			return nil
 		},
 	}
 
