@@ -132,6 +132,7 @@ func (l *assemLine) runLogScan(ctx context.Context, pipeline *Pipeline) error {
 		if err == io.EOF {
 			return nil
 		} else if err != nil {
+			// TODO: implement it as design document described
 			return err
 		}
 
