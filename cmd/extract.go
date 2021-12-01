@@ -6,7 +6,9 @@ import (
 	"log"
 	"path/filepath"
 	"sync"
-
+	"os"
+	
+	"github.com/BurntSushi/toml"
 	"github.com/IANTHEREAL/logutil/extractor/go/analyzer"
 	"github.com/IANTHEREAL/logutil/extractor/go/compiler"
 	logextractor "github.com/IANTHEREAL/logutil/extractor/go/log"
