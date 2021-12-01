@@ -3,6 +3,7 @@ module github.com/IANTHEREAL/logutil
 go 1.17
 
 require (
+	github.com/BurntSushi/toml v0.4.1 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
 	github.com/jmhodges/levigo v1.0.0 // indirect

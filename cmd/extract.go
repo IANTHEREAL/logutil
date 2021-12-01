@@ -2,12 +2,14 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"go/build"
 	"log"
-	"path/filepath"
-	"sync"
 	"os"
-	
+	"path/filepath"
+	"strings"
+	"sync"
+
 	"github.com/BurntSushi/toml"
 	"github.com/IANTHEREAL/logutil/extractor/go/analyzer"
 	"github.com/IANTHEREAL/logutil/extractor/go/compiler"
@@ -22,7 +24,7 @@ var (
 	Codebase    string
 	FlterConfig string
 	Output      string
-	
+
 	rule *logextractor.LogPatternRule
 )
 
@@ -32,22 +34,27 @@ func NewExtractCmd() *cobra.Command {
 		Short:        "Extract logs pattern and reference code information from codebase and compilation",
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if filterConfig != "" {
+			if FlterConfig != "" {
 				rule = &logextractor.LogPatternRule{}
-				if err := StrictDecodeFile(filterConfig, rule); err != nil {
-					return errors.Trace(err)
+				if err := StrictDecodeFile(FlterConfig, rule); err != nil {
+					return err
 				}
 			}
-			
-			if Exists(output) {
-				return fmt.Errorf("output %s should be empty", output)
-			}
-			
-			if !Exist(Codebase) {
+
+			if !Exists(Codebase) {
 				return fmt.Errorf("code %s doesn't exists", Codebase)
 			}
-			
-			ExtractLogPattern(Codebase, rule, output)
+
+			if Output == "" {
+				absOutput, err := filepath.Abs(Codebase)
+				if err != nil {
+					return err
+				}
+
+				Output = fmt.Sprintf("./%s.logpattern", filepath.Base(absOutput))
+			}
+
+			ExtractLogPattern(Codebase, rule, Output)
 			return nil
 		},
 	}
@@ -132,10 +139,10 @@ func ExtractLogPattern(codebase string, rule *logextractor.LogPatternRule, store
 
 // StrictDecodeFile decodes the toml file strictly. If any item in confFile file is not mapped
 // into the Config struct, issue an error
-func StrictDecodeFile(path, cfg interface{}) error {
+func StrictDecodeFile(path string, cfg interface{}) error {
 	metaData, err := toml.DecodeFile(path, cfg)
 	if err != nil {
-		return errors.Trace(err)
+		return err
 	}
 
 	if undecoded := metaData.Undecoded(); len(undecoded) > 0 {
@@ -143,19 +150,19 @@ func StrictDecodeFile(path, cfg interface{}) error {
 		for _, item := range undecoded {
 			undecodedItems = append(undecodedItems, item.String())
 		}
-		err = errors.Errorf("filter rule config file %s contained unknown configuration options: %s", path, strings.Join(undecodedItems, ", "))
+		err = fmt.Errorf("filter rule config file %s contained unknown configuration options: %s", path, strings.Join(undecodedItems, ", "))
 	}
 
-	return errors.Trace(err)
+	return err
 }
 
-func Exists(path string) bool {  
-    _, err := os.Stat(path) 
-    if err != nil {  
-        if os.IsExist(err) {  
-            return true  
-        }  
-        return false  
-    }  
-    return true  
-}  
+func Exists(path string) bool {
+	_, err := os.Stat(path)
+	if err != nil {
+		if os.IsExist(err) {
+			return true
+		}
+		return false
+	}
+	return true
+}

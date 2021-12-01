@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"strings"
 
 	log_scanner "github.com/IANTHEREAL/logutil/scanner"
 	"github.com/IANTHEREAL/logutil/storage/keyvalue"
@@ -30,16 +32,16 @@ func NewScanCmd() *cobra.Command {
 				"/Users/ianz/Work/go/src/github.com/pingcap/dm/log/dm-worker-2.log",
 				"/Users/ianz/Work/go/src/github.com/pingcap/dm/log/dm-worker-3.log",
 			})*/
-			
-			if Exists(LogPattern) {
+
+			if !Exists(LogPattern) {
 				return fmt.Errorf("log pattern set doesn't exist")
 			}
-			
-			files := Strings.Split(LohFile, ",")
+
+			files := strings.Split(LogFile, ",")
 			if len(files) <= 0 {
 				return fmt.Errorf("log files don't exist")
 			}
-			
+
 			ScanLog(LogPattern, files)
 			return nil
 		},

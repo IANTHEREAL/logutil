@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"log"
 	"os"
 
@@ -25,8 +26,8 @@ func NewAnalyzeCmd() *cobra.Command {
 			if !Exists(LogCoverage) {
 				return fmt.Errorf("log coverage does't not exist")
 			}
-			
-			Report(LogCoverage, output)
+
+			Report(LogCoverage, Output)
 			return nil
 		},
 	}
