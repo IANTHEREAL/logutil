@@ -153,6 +153,7 @@ func (l *assemLine) runMathAndRecord(ctx context.Context, pipeline *Pipeline) er
 		}
 
 		res := l.matcher.Match(payload.log)
+		// TODO: check unknon log pattern need to config log level
 		if (res == nil || len(res.Patterns) == 0) && payload.log.Level == "error" {
 			l.unknowLogs.Record(payload.log)
 		} else {
