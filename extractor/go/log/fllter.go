@@ -10,8 +10,8 @@ import "log"
 // LogPatternRule.Level = ["error", "warn"] will filter error or warn level log print pattern
 // LogPatternRule.Signature = ["network disconnect"] will filter log contains "network disconnect"
 type LogPatternRule struct {
-	Level     []string
-	Signature []string
+	Level     []string `toml:"log-level" json:"log-level"`
+	Signature []string `toml:"log-signature" json:"log-signature"`
 }
 
 func (rule *LogPatternRule) Match(level string, message string) bool {
