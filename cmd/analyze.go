@@ -20,8 +20,14 @@ func NewAnalyzeCmd() *cobra.Command {
 		Use:   "analyze",
 		Short: "Analyze the coverage result and output the analysis result report",
 		//Args:  cobra.MinimumNArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
-			Report("/Users/ianz/Work/go/src/github.com/IANTHEREAL/logutil/tmp/", OutReport)
+		RunE: func(cmd *cobra.Command, args []string) error {
+			//Report("/Users/ianz/Work/go/src/github.com/IANTHEREAL/logutil/tmp/", OutReport)
+			if !Exists(LogCoverage) {
+				return fmt.Errorf("log coverage does't not exist")
+			}
+			
+			Report(LogCoverage, output)
+			return nil
 		},
 	}
 
