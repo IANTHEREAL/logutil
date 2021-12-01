@@ -20,6 +20,8 @@ var (
 	Codebase    string
 	FlterConfig string
 	Output      string
+	
+	rule *logextractor.LogPatternRule
 )
 
 func NewExtractCmd() *cobra.Command {
@@ -27,8 +29,24 @@ func NewExtractCmd() *cobra.Command {
 		Use:          "extract",
 		Short:        "Extract logs pattern and reference code information from codebase and compilation",
 		SilenceUsage: true,
-		Run: func(cmd *cobra.Command, args []string) {
-			ExtractLogPattern(Codebase, nil, "/Users/ianz/Work/go/src/github.com/IANTHEREAL/logutil/tmp/")
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if filterConfig != "" {
+				rule = &logextractor.LogPatternRule{}
+				if err := StrictDecodeFile(filterConfig, rule); err != nil {
+					return errors.Trace(err)
+				}
+			}
+			
+			if Exists(output) {
+				return fmt.Errorf("output %s should be empty", output)
+			}
+			
+			if !Exist(Codebase) {
+				return fmt.Errorf("code %s doesn't exists", Codebase)
+			}
+			
+			ExtractLogPattern(Codebase, rule, output)
+			return nil
 		},
 	}
 
@@ -109,3 +127,33 @@ func ExtractLogPattern(codebase string, rule *logextractor.LogPatternRule, store
 	}
 	done.Wait()
 }
+
+// StrictDecodeFile decodes the toml file strictly. If any item in confFile file is not mapped
+// into the Config struct, issue an error
+func StrictDecodeFile(path, cfg interface{}) error {
+	metaData, err := toml.DecodeFile(path, cfg)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if undecoded := metaData.Undecoded(); len(undecoded) > 0 {
+		var undecodedItems []string
+		for _, item := range undecoded {
+			undecodedItems = append(undecodedItems, item.String())
+		}
+		err = errors.Errorf("filter rule config file %s contained unknown configuration options: %s", path, strings.Join(undecodedItems, ", "))
+	}
+
+	return errors.Trace(err)
+}
+
+func Exists(path string) bool {  
+    _, err := os.Stat(path) 
+    if err != nil {  
+        if os.IsExist(err) {  
+            return true  
+        }  
+        return false  
+    }  
+    return true  
+}  
