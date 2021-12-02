@@ -6,6 +6,8 @@ import (
 	"log"
 	"sync"
 
+	"github.com/IANTHEREAL/logutil/pkg/util"
+	logpattern_go_proto "github.com/IANTHEREAL/logutil/proto"
 	matcher "github.com/IANTHEREAL/logutil/scanner/log_match"
 	recorder "github.com/IANTHEREAL/logutil/scanner/log_record"
 	scanner "github.com/IANTHEREAL/logutil/scanner/log_scan"
@@ -52,7 +54,7 @@ func NewLogProcessor(store *keyvalue.Store, logPaths []string) (*LogProcessor, e
 }
 
 // Run starts the log processing
-func (s *LogProcessor) Run(ctx context.Context) error {
+func (s *LogProcessor) Run(ctx context.Context, rule *logpattern_go_proto.LogPatternRule) error {
 	//pipeline := NewPipiline(1024)
 	wg := sync.WaitGroup{}
 
@@ -60,7 +62,7 @@ func (s *LogProcessor) Run(ctx context.Context) error {
 		line := newAssemLine(s.matcher, scanner, s.coverager, s.unknowLogs)
 		wg.Add(1)
 		go func(l *assemLine) {
-			if err := l.run(ctx); err != nil {
+			if err := l.run(ctx, rule); err != nil {
 				log.Printf("process line %s meet error %v", l.scanner.GetLogPath(), err)
 			}
 			wg.Done()
@@ -91,7 +93,7 @@ func newAssemLine(matcher *matcher.PatternMatcher, scanner *scanner.LogScanner, 
 }
 
 // run starts and runs this processing logic line
-func (l *assemLine) run(ctx context.Context) error {
+func (l *assemLine) run(ctx context.Context, rule *logpattern_go_proto.LogPatternRule) error {
 	pipeline := NewPipiline(1024)
 	wg := sync.WaitGroup{}
 
@@ -113,7 +115,7 @@ func (l *assemLine) run(ctx context.Context) error {
 		wg.Done()
 	}()
 
-	err2 = l.runMathAndRecord(ctx, pipeline)
+	err2 = l.runMathAndRecord(ctx, pipeline, rule)
 	cancel()
 	wg.Wait()
 
@@ -132,7 +134,6 @@ func (l *assemLine) runLogScan(ctx context.Context, pipeline *Pipeline) error {
 		if err == io.EOF {
 			return nil
 		} else if err != nil {
-			// TODO: implement it as design document described
 			return err
 		}
 
@@ -144,7 +145,7 @@ func (l *assemLine) runLogScan(ctx context.Context, pipeline *Pipeline) error {
 }
 
 // runMathAndRecord recieve log from pipeline and match them with log pattern，then record the coverage
-func (l *assemLine) runMathAndRecord(ctx context.Context, pipeline *Pipeline) error {
+func (l *assemLine) runMathAndRecord(ctx context.Context, pipeline *Pipeline, rule *logpattern_go_proto.LogPatternRule) error {
 	for {
 		payload, err := pipeline.Read(ctx)
 		if err == io.EOF {
@@ -154,8 +155,7 @@ func (l *assemLine) runMathAndRecord(ctx context.Context, pipeline *Pipeline) er
 		}
 
 		res := l.matcher.Match(payload.log)
-		// TODO: check unknon log pattern need to config log level
-		if (res == nil || len(res.Patterns) == 0) && payload.log.Level == "error" {
+		if (res == nil || len(res.Patterns) == 0) && util.MatchLogPatternRule(rule, payload.log.Level, "") {
 			l.unknowLogs.Record(payload.log)
 		} else {
 			for _, lp := range res.Patterns {

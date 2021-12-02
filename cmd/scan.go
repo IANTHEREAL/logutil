@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 
+	"github.com/IANTHEREAL/logutil/pkg/util"
 	log_scanner "github.com/IANTHEREAL/logutil/scanner"
 	"github.com/IANTHEREAL/logutil/storage/keyvalue"
 	"github.com/IANTHEREAL/logutil/storage/leveldb"
@@ -62,12 +63,17 @@ func ScanLog(storePath string, logs []string) {
 
 	store := keyvalue.NewLogPatternStore(db)
 
+	rule, err := util.GetLogPatternRule(store)
+	if err != nil {
+		log.Fatalf("get log pattern rule from store failed %v", err)
+	}
+
 	p, err := log_scanner.NewLogProcessor(store, logs)
 	if err != nil {
 		log.Fatalf("new scanner pipeline failed %s", err)
 	}
 
-	err = p.Run(context.Background())
+	err = p.Run(context.Background(), rule)
 	if err != nil {
 		log.Fatalf("scanner run %s", err)
 	}

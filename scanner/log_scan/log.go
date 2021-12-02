@@ -57,12 +57,14 @@ func (l *LogScanner) Scan() (*Log, error) {
 	for err != nil {
 		if err == io.EOF {
 			return nil, err
-		}
-
-		if err != ErrLogIncomplete {
+		} else if err == ErrNeedSkipLog {
 			// skip line
-			log.Printf("[skip log]read log error %v: %s", err, line)
+			log.Printf("[skip log] [log file %s] [log data %s]", l.logPath, line)
 			line = []byte{}
+		} else if err == ErrLogIncomplete {
+
+		} else {
+			return nil, err
 		}
 		// try to find a complete log
 		lg, line, err = l.scanLog(line)

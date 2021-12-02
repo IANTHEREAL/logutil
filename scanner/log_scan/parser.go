@@ -10,7 +10,7 @@ import (
 var (
 	ErrNotFoundParser = errors.New("not suitable log parser")
 	ErrLogIncomplete  = errors.New("incomplete log")
-	ErrZapLog         = errors.New("not vaild zap log")
+	ErrNeedSkipLog    = errors.New("invaild log need to be skip")
 )
 
 // Each log package has its own style of log printing
@@ -81,7 +81,7 @@ func (z *ZapLog) Extract(line []byte) error {
 	if len(z.Rest) >= 1 && z.Rest[0] == '[' {
 		z.Rest = z.Rest[1:]
 	} else {
-		return ErrZapLog
+		return ErrNeedSkipLog
 	}
 
 	// Take until ']' as Time(string)
@@ -97,7 +97,7 @@ func (z *ZapLog) Extract(line []byte) error {
 	if bytes.HasPrefix(z.Rest, constSpaceLsbrck) {
 		z.Rest = z.Rest[len(constSpaceLsbrck):]
 	} else {
-		return ErrZapLog
+		return ErrNeedSkipLog
 	}
 
 	// Take until ']' as Level(string)
@@ -105,7 +105,7 @@ func (z *ZapLog) Extract(line []byte) error {
 	if pos >= 0 {
 		z.Level = string(z.Rest[:pos])
 		if !isVaildLogEvel(z.Level) {
-			return ErrZapLog
+			return ErrNeedSkipLog
 		}
 		z.Rest = z.Rest[pos+1:]
 	} else {
@@ -116,7 +116,7 @@ func (z *ZapLog) Extract(line []byte) error {
 	if bytes.HasPrefix(z.Rest, constSpaceLsbrck) {
 		z.Rest = z.Rest[len(constSpaceLsbrck):]
 	} else {
-		return ErrZapLog
+		return ErrNeedSkipLog
 	}
 
 	// Take until ']' as Position(string)
@@ -132,7 +132,7 @@ func (z *ZapLog) Extract(line []byte) error {
 	if bytes.HasPrefix(z.Rest, constSpaceLsbrck) {
 		z.Rest = z.Rest[len(constSpaceLsbrck):]
 	} else {
-		return ErrZapLog
+		return ErrNeedSkipLog
 	}
 
 	// Take until ']' as Msg(string)

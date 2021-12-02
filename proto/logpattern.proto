@@ -76,3 +76,13 @@ message UnknowLogPattern {
    // the count to be covered in every file
    map<string, int32> cov_count_by_log = 4;
 }
+
+// LogPatternRule is used to filter log printing pattern in the code,
+// which is referred to as log pattern.
+// usage:
+// LogPatternRule.log_level = ["error", "warn"] will filter error or warn level log print pattern
+// LogPatternRule.log_signatures = ["network disconnect"] will filter log contains "network disconnect"
+message LogPatternRule {
+   repeated string log_level = 1;
+   repeated string log_signatures = 2;
+}

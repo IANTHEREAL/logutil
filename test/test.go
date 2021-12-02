@@ -155,7 +155,7 @@ func testMatcher(store *keyvalue.Store) {
 		log.Fatalf("new scanner pipeline failed %s", err)
 	}
 
-	err = p.Run(context.Background())
+	err = p.Run(context.Background(), nil)
 	if err != nil {
 		log.Fatalf("scanner run %s", err)
 	}

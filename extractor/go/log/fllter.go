@@ -1,39 +1,11 @@
 package log_extractor
 
-import "log"
+import (
+	"log"
 
-// LogPatternRule is used to filter log printing pattern in the code,
-// which is referred to as log pattern.
-// The log pattern returned by filter.Filter() can definitely
-// has the specified log level or signature (log keyword)
-// usage:
-// LogPatternRule.Level = ["error", "warn"] will filter error or warn level log print pattern
-// LogPatternRule.Signature = ["network disconnect"] will filter log contains "network disconnect"
-type LogPatternRule struct {
-	Level     []string `toml:"log-level" json:"log-level"`
-	Signature []string `toml:"log-signature" json:"log-signature"`
-}
-
-func (rule *LogPatternRule) Match(level string, message string) bool {
-	if rule == nil {
-		return true
-	}
-
-	// if there are no log level rule， return true；
-	// otherwise return the matched result
-	if len(rule.Level) > 0 {
-		for _, l := range rule.Level {
-			if l == level {
-				return true
-			}
-		}
-		return false
-	}
-
-	// TODO: add signatures matching algorithm
-
-	return false
-}
+	"github.com/IANTHEREAL/logutil/pkg/util"
+	logpattern_go_proto "github.com/IANTHEREAL/logutil/proto"
+)
 
 // LogPkgExtract designed to extract log printing level according to the log package used,
 // e.g. error level using Errorf() method of the zap log package
@@ -57,15 +29,10 @@ func init() {
 
 // Filter used to determine whether the log pattern matched filter rule
 type Filter struct {
-	filterRule *LogPatternRule
+	filterRule *logpattern_go_proto.LogPatternRule
 }
 
-func NewFilter(rule *LogPatternRule) *Filter {
-	if rule == nil {
-		rule = &LogPatternRule{
-			Level: []string{"error"},
-		}
-	}
+func NewFilter(rule *logpattern_go_proto.LogPatternRule) *Filter {
 	return &Filter{filterRule: rule}
 }
 
@@ -73,7 +40,7 @@ func NewFilter(rule *LogPatternRule) *Filter {
 func (f *Filter) Filter(pkgName, fnName, logMesage string) (string, bool) {
 	for _, filter := range filterHub {
 		if level, matched := filter.Filter(pkgName, fnName, logMesage); matched {
-			if f.filterRule.Match(level, logMesage) {
+			if util.MatchLogPatternRule(f.filterRule, level, logMesage) {
 				return level, true
 			}
 		}

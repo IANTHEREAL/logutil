@@ -207,6 +207,22 @@ func (s *Store) ScanLogCoverage(ctx context.Context, fn func(key, value []byte) 
 	return s.scan(ctx, coverageKeyPrefixBytes, fn)
 }
 
+// WriteLogPatternRule used write log pattern rule into keyvalue DB.
+func (s *Store) WriteLogPatternRule(ctx context.Context, rule *logpattern_go_proto.LogPatternRule) (err error) {
+	key, _ := EncodeLogPatternRuleKey()
+
+	value, err := rule.Marshal()
+	if err != nil {
+		return fmt.Errorf("encoding error: %v", err)
+	}
+	return s.write(ctx, key, value)
+}
+
+// ScanLogPatternRule scans log pattern rule from the keyvalue DB.
+func (s *Store) ScanLogPatternRule(ctx context.Context, fn func(key, value []byte) error) error {
+	return s.scan(ctx, patternRuleKeyPrefixBytes, fn)
+}
+
 func (s *Store) write(ctx context.Context, key, value []byte) (err error) {
 	wr, err := s.db.Writer(ctx)
 	if err != nil {
@@ -250,18 +266,20 @@ func (s *Store) scan(ctx context.Context, keyPrefix []byte, fn func(key, value [
 func (s *Store) Close(ctx context.Context) error { return s.db.Close(ctx) }
 
 const (
-	LogPatternKeyPrefix = "log:"
-	FunctionKeyPrefix   = "fn:"
-	CoverageKeyPrefix   = "cov:"
+	LogPatternKeyPrefix     = "log:"
+	FunctionKeyPrefix       = "fn:"
+	CoverageKeyPrefix       = "cov:"
+	LogPatternRuleKeyPrefix = "rule:"
 )
 
 var (
-	logKeyPrefixBytes      = []byte(LogPatternKeyPrefix)
-	functionKeyPrefixBytes = []byte(FunctionKeyPrefix)
-	coverageKeyPrefixBytes = []byte(CoverageKeyPrefix)
+	logKeyPrefixBytes         = []byte(LogPatternKeyPrefix)
+	functionKeyPrefixBytes    = []byte(FunctionKeyPrefix)
+	coverageKeyPrefixBytes    = []byte(CoverageKeyPrefix)
+	patternRuleKeyPrefixBytes = []byte(LogPatternRuleKeyPrefix)
 )
 
-// EncodeLogKey returns a canonical encoding of log pattern key
+// EncodeLogKey returns a canonical encoding key of log pattern
 func EncodeLogKey(pos *logpattern_go_proto.Position) ([]byte, error) {
 	if pos == nil {
 		return nil, errors.New("invalid position: missing position for key encoding")
@@ -278,7 +296,7 @@ func EncodeLogKey(pos *logpattern_go_proto.Position) ([]byte, error) {
 	}, nil), nil
 }
 
-// EncodeLogKey returns a canonical encoding of coverage data key
+// EncodeLogKey returns a canonical encoding key of coverage data
 func EncodeCoverageKey(pos *logpattern_go_proto.Position) ([]byte, error) {
 	if pos == nil {
 		return nil, errors.New("invalid position: missing position for key encoding")
@@ -292,5 +310,13 @@ func EncodeCoverageKey(pos *logpattern_go_proto.Position) ([]byte, error) {
 	return bytes.Join([][]byte{
 		coverageKeyPrefixBytes,
 		posBytes,
+	}, nil), nil
+}
+
+// EncodeLogPatternRuleKey returns a canonical encoding key of log pattern rule
+func EncodeLogPatternRuleKey() ([]byte, error) {
+	return bytes.Join([][]byte{
+		patternRuleKeyPrefixBytes,
+		[]byte("log_pattern"),
 	}, nil), nil
 }

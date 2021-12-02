@@ -7,13 +7,12 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 
-	"github.com/BurntSushi/toml"
 	"github.com/IANTHEREAL/logutil/extractor/go/analyzer"
 	"github.com/IANTHEREAL/logutil/extractor/go/compiler"
 	logextractor "github.com/IANTHEREAL/logutil/extractor/go/log"
+	"github.com/IANTHEREAL/logutil/pkg/util"
 	logpattern_go_proto "github.com/IANTHEREAL/logutil/proto"
 	"github.com/IANTHEREAL/logutil/storage/keyvalue"
 	"github.com/IANTHEREAL/logutil/storage/leveldb"
@@ -25,7 +24,7 @@ var (
 	FlterConfig string
 	Output      string
 
-	rule *logextractor.LogPatternRule
+	rule *logpattern_go_proto.LogPatternRule
 )
 
 func NewExtractCmd() *cobra.Command {
@@ -34,10 +33,17 @@ func NewExtractCmd() *cobra.Command {
 		Short:        "Extract logs pattern and reference code information from codebase and compilation",
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// handle filter config
 			if FlterConfig != "" {
-				rule = &logextractor.LogPatternRule{}
-				if err := StrictDecodeFile(FlterConfig, rule); err != nil {
+				rule = &logpattern_go_proto.LogPatternRule{}
+				// read from config file
+				if err := util.StrictDecodeFile(FlterConfig, rule); err != nil {
 					return err
+				}
+			} else {
+				// set default config, log_level = ["error"]
+				rule = &logpattern_go_proto.LogPatternRule{
+					LogLevel: []string{"error"},
 				}
 			}
 
@@ -60,12 +66,12 @@ func NewExtractCmd() *cobra.Command {
 	}
 
 	cmdExtract.Flags().StringVar(&Codebase, "codebase", "./", "Source codebase directory for extracting log information")
-	cmdExtract.Flags().StringVar(&FlterConfig, "filter", "", "the log filter rule config file, using log level `log-level:[Error|Fatal]` or log keywords `keywords:[regex1,regex2]`")
+	cmdExtract.Flags().StringVar(&FlterConfig, "filter", "", "the log filter rule config file using json format, if no config file, default set logLevel = error")
 	cmdExtract.Flags().StringVar(&Output, "output", "", "the output file that stores the extracted log pattern and reference code information(default \"./${codebase-dirname}.logpattern\")")
 	return cmdExtract
 }
 
-func ExtractLogPattern(codebase string, rule *logextractor.LogPatternRule, storePath string) {
+func ExtractLogPattern(codebase string, rule *logpattern_go_proto.LogPatternRule, storePath string) {
 	db, err := leveldb.Open(storePath, nil)
 	if err != nil {
 		log.Fatalf("open leveldb failed %v", err)
@@ -73,7 +79,12 @@ func ExtractLogPattern(codebase string, rule *logextractor.LogPatternRule, store
 
 	store := keyvalue.NewLogPatternStore(db)
 
-	filter := logextractor.NewFilter(nil)
+	err = store.WriteLogPatternRule(context.Background(), rule)
+	if err != nil {
+		log.Fatalf("save log pattern rule into log patern store failed %v", err)
+	}
+
+	filter := logextractor.NewFilter(rule)
 	builder := &logextractor.Builder{}
 
 	path, err := filepath.Abs(codebase)
@@ -135,25 +146,6 @@ func ExtractLogPattern(codebase string, rule *logextractor.LogPatternRule, store
 		log.Fatalf("analyze failed %d", err)
 	}
 	done.Wait()
-}
-
-// StrictDecodeFile decodes the toml file strictly. If any item in confFile file is not mapped
-// into the Config struct, issue an error
-func StrictDecodeFile(path string, cfg interface{}) error {
-	metaData, err := toml.DecodeFile(path, cfg)
-	if err != nil {
-		return err
-	}
-
-	if undecoded := metaData.Undecoded(); len(undecoded) > 0 {
-		var undecodedItems []string
-		for _, item := range undecoded {
-			undecodedItems = append(undecodedItems, item.String())
-		}
-		err = fmt.Errorf("filter rule config file %s contained unknown configuration options: %s", path, strings.Join(undecodedItems, ", "))
-	}
-
-	return err
 }
 
 func Exists(path string) bool {

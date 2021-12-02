@@ -24,18 +24,9 @@ type trieCase struct {
 func (t *testPatternTrieSuite) TestMatch(c *C) {
 	trie := NewPatternTrie()
 
-	patterns := testGenerateLogPattern()
+	patterns, bps := testGenerateLogPattern()
 	for _, pattern := range patterns {
 		trie.Insert(pattern.Signature[0], pattern)
-	}
-
-	bps := []*BriefPattern{
-		{id: "github.com/pingcap/ticdc/dm:dm/dm/master/config.go:159:7274", matchedPos: "config.go:159", matchedLevel: "error"},
-		{id: "github.com/pingcap/ticdc/dm:dm/dm/master/config.go:154:7274", matchedPos: "config.go:154", matchedLevel: "error"},
-		{id: "github.com/pingcap/ticdc/dm:dm/dm/master2/config.go:159:7274", matchedPos: "config.go:159", matchedLevel: "warn"},
-		{id: "github.com/pingcap/ticdc/dm:dm/dm/master2/config.go:154:7274", matchedPos: "config.go:154", matchedLevel: "error"},
-		{id: "github.com/pingcap/ticdc/dm:dm/dm/master3/config.go:159:7274", matchedPos: "config.go:159", matchedLevel: "error"},
-		{id: "github.com/pingcap/ticdc/dm:dm/dm/master3/config.go:154:7274", matchedPos: "config.go:154", matchedLevel: "error"},
 	}
 
 	cases := []*trieCase{
@@ -70,10 +61,15 @@ func (t *testPatternTrieSuite) TestMatch(c *C) {
 			},
 		},
 		{
-			// Signature: []string{"\"fail to marshal config to toml\"%"},
 			input: []string{"\"fail to marshal config to toml\"xxxxx", "error", "config.go:159"},
 			res: &MatchedResult{
 				Patterns: map[string]*BriefPattern{bps[4].ID(): bps[4]},
+			},
+		},
+		{
+			input: []string{"\"fail to marshal config to %toml\"", "error", "config.go:159"},
+			res: &MatchedResult{
+				Patterns: map[string]*BriefPattern{bps[6].ID(): bps[6]},
 			},
 		},
 	}
@@ -92,21 +88,13 @@ func (t *testPatternTrieSuite) TestMatch(c *C) {
 }
 
 func (t *testPatternTrieSuite) TestBriefPattern(c *C) {
-	patterns := testGenerateLogPattern()
-	res := []*BriefPattern{
-		{id: "github.com/pingcap/ticdc/dm:dm/dm/master/config.go:159:7274", matchedPos: "config.go:159", matchedLevel: "error"},
-		{id: "github.com/pingcap/ticdc/dm:dm/dm/master/config.go:154:7274", matchedPos: "config.go:154", matchedLevel: "error"},
-		{id: "github.com/pingcap/ticdc/dm:dm/dm/master2/config.go:159:7274", matchedPos: "config.go:159", matchedLevel: "warn"},
-		{id: "github.com/pingcap/ticdc/dm:dm/dm/master2/config.go:154:7274", matchedPos: "config.go:154", matchedLevel: "error"},
-		{id: "github.com/pingcap/ticdc/dm:dm/dm/master3/config.go:159:7274", matchedPos: "config.go:159", matchedLevel: "error"},
-		{id: "github.com/pingcap/ticdc/dm:dm/dm/master3/config.go:154:7274", matchedPos: "config.go:154", matchedLevel: "error"},
-	}
+	patterns, bps := testGenerateLogPattern()
 
 	for index, pattern := range patterns {
 		bp := NewBriefPattern(pattern)
-		c.Assert(bp.ID(), Equals, res[index].ID())
-		c.Assert(bp.matchedPos, Equals, res[index].matchedPos)
-		c.Assert(bp.matchedLevel, Equals, res[index].matchedLevel)
+		c.Assert(bp.ID(), Equals, bps[index].ID())
+		c.Assert(bp.matchedPos, Equals, bps[index].matchedPos)
+		c.Assert(bp.matchedLevel, Equals, bps[index].matchedLevel)
 	}
 
 	bp := NewBriefPattern(&logpattern_go_proto.LogPattern{
@@ -133,11 +121,31 @@ func (t *testPatternTrieSuite) TestMatchedResult(c *C) {
 
 	c.Assert(res1.empty(), IsTrue)
 
-	patterns := testGenerateLogPattern()
+	patterns, _ := testGenerateLogPattern()
 	bi := &baseItem{pattern: make(map[string]*BriefPattern)}
 	for _, pattern := range patterns {
 		bi.setLogPattern(pattern)
 	}
+	bi.setLogPattern(&logpattern_go_proto.LogPattern{
+		Pos: &logpattern_go_proto.Position{
+			PackagePath: &logpattern_go_proto.PackagePath{
+				Repo: "github.com/pingcap/ticdc/dm",
+			},
+			FilePath:     "dm/dm/master3/config.go",
+			LineNumber:   159,
+			ColumnOffset: 7274,
+		},
+		Func: &logpattern_go_proto.FuncInfo{
+			Name: "Toml",
+			Pos: &logpattern_go_proto.Position{
+				FilePath:     "dm/dm/master/config.go",
+				LineNumber:   138,
+				ColumnOffset: 7140,
+			},
+		},
+		Level:     "error",
+		Signature: []string{"\"fail to marshal config to %%toml\""},
+	})
 	c.Assert(bi.pattern, HasLen, len(patterns))
 
 	res1.append(bi)
@@ -149,7 +157,7 @@ func (t *testPatternTrieSuite) TestMatchedResult(c *C) {
 	})
 	res2.append(bi)
 	c.Assert(res2.empty(), IsFalse)
-	c.Assert(res2.Patterns, HasLen, 2)
+	c.Assert(res2.Patterns, HasLen, 3)
 }
 
 type repalceFormatPlaceholderCase struct {
@@ -194,7 +202,7 @@ func (t *testPatternTrieSuite) TestRepalceFormatPlaceholder(c *C) {
 	}
 }
 
-func testGenerateLogPattern() []*logpattern_go_proto.LogPattern {
+func testGenerateLogPattern() ([]*logpattern_go_proto.LogPattern, []*BriefPattern) {
 	var patterns []*logpattern_go_proto.LogPattern
 
 	/*
@@ -263,7 +271,7 @@ func testGenerateLogPattern() []*logpattern_go_proto.LogPattern {
 			},
 		},
 		Level:     "warn",
-		Signature: []string{"\"fail to marshal config %s to toml\""},
+		Signature: []string{"\"fail to marshal config %s%s to toml\""},
 	}
 	patterns = append(patterns, pattern)
 
@@ -333,5 +341,37 @@ func testGenerateLogPattern() []*logpattern_go_proto.LogPattern {
 	}
 	patterns = append(patterns, pattern)
 
-	return patterns
+	pattern = &logpattern_go_proto.LogPattern{
+		Pos: &logpattern_go_proto.Position{
+			PackagePath: &logpattern_go_proto.PackagePath{
+				Repo: "github.com/pingcap/ticdc/dm",
+			},
+			FilePath:     "dm/dm/master4/config.go",
+			LineNumber:   159,
+			ColumnOffset: 7274,
+		},
+		Func: &logpattern_go_proto.FuncInfo{
+			Name: "Toml",
+			Pos: &logpattern_go_proto.Position{
+				FilePath:     "dm/dm/master/config.go",
+				LineNumber:   138,
+				ColumnOffset: 7140,
+			},
+		},
+		Level:     "error",
+		Signature: []string{"\"fail to marshal config to %%toml\""},
+	}
+	patterns = append(patterns, pattern)
+
+	bps := []*BriefPattern{
+		{id: "github.com/pingcap/ticdc/dm:dm/dm/master/config.go:159:7274", matchedPos: "config.go:159", matchedLevel: "error"},
+		{id: "github.com/pingcap/ticdc/dm:dm/dm/master/config.go:154:7274", matchedPos: "config.go:154", matchedLevel: "error"},
+		{id: "github.com/pingcap/ticdc/dm:dm/dm/master2/config.go:159:7274", matchedPos: "config.go:159", matchedLevel: "warn"},
+		{id: "github.com/pingcap/ticdc/dm:dm/dm/master2/config.go:154:7274", matchedPos: "config.go:154", matchedLevel: "error"},
+		{id: "github.com/pingcap/ticdc/dm:dm/dm/master3/config.go:159:7274", matchedPos: "config.go:159", matchedLevel: "error"},
+		{id: "github.com/pingcap/ticdc/dm:dm/dm/master3/config.go:154:7274", matchedPos: "config.go:154", matchedLevel: "error"},
+		{id: "github.com/pingcap/ticdc/dm:dm/dm/master4/config.go:159:7274", matchedPos: "config.go:159", matchedLevel: "error"},
+	}
+
+	return patterns, bps
 }
