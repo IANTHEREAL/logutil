@@ -60,7 +60,13 @@ func NewExtractCmd() *cobra.Command {
 				Output = fmt.Sprintf("./%s.logpattern", filepath.Base(absOutput))
 			}
 
-			ExtractLogPattern(Codebase, rule, Output)
+			db, err := leveldb.Open(Output, nil)
+			if err != nil {
+				log.Fatalf("open leveldb failed %v", err)
+			}
+			store := keyvalue.NewLogPatternStore(db)
+
+			ExtractLogPattern(store, Codebase, rule)
 			return nil
 		},
 	}
@@ -71,15 +77,8 @@ func NewExtractCmd() *cobra.Command {
 	return cmdExtract
 }
 
-func ExtractLogPattern(codebase string, rule *logpattern_go_proto.LogPatternRule, storePath string) {
-	db, err := leveldb.Open(storePath, nil)
-	if err != nil {
-		log.Fatalf("open leveldb failed %v", err)
-	}
-
-	store := keyvalue.NewLogPatternStore(db)
-
-	err = store.WriteLogPatternRule(context.Background(), rule)
+func ExtractLogPattern(store *keyvalue.Store, codebase string, rule *logpattern_go_proto.LogPatternRule) {
+	err := store.WriteLogPatternRule(context.Background(), rule)
 	if err != nil {
 		log.Fatalf("save log pattern rule into log patern store failed %v", err)
 	}

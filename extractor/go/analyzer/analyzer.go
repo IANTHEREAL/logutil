@@ -5,7 +5,6 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
-	"log"
 
 	logpattern "github.com/IANTHEREAL/logutil/proto"
 	"github.com/gogo/protobuf/proto"
@@ -33,12 +32,6 @@ func NewAstAnalyzer(fn func(logPkg, logFn, logMessage string) (string, bool)) *l
 func (ai *logAanalyzer) Run(file *ast.File, helper *AstHelper) {
 	ast.Walk(newASTVisitor(func(node ast.Node, stack stackFunc) bool {
 		switch n := node.(type) {
-		case *ast.FuncDecl:
-			// cache the function to help find call context
-			ai.visitFuncDecl(n, stack, helper)
-		case *ast.FuncLit:
-			// cache the function to help find call context
-			ai.visitFuncLit(n, stack, helper)
 		case *ast.BasicLit:
 			// try to filter log pattern
 			ai.filterLog(n, stack, helper)
@@ -119,29 +112,10 @@ func (ai *logAanalyzer) matchLog(l *ast.BasicLit, fn *ast.Ident, stack stackFunc
 	//log.Printf("done match log %+v", l)
 }
 
-// visitFuncDecl handles function and method declarations.
-func (ai *logAanalyzer) visitFuncDecl(decl *ast.FuncDecl, stack stackFunc, helper *AstHelper) {
-	// Get the type of this function, even if its name is blank.
-	obj, _ := helper.GetTypeDef(decl.Name).(*types.Func)
-	if obj == nil {
-		return // a redefinition, for example
-	}
-}
-
-// visitFuncLit handles function literals.
-func (ai *logAanalyzer) visitFuncLit(flit *ast.FuncLit, stack stackFunc, helper *AstHelper) {
-	fi, _ := ai.callContext(stack, helper)
-	if fi == "" {
-		log.Fatalf("Function literal without a context: %v", flit)
-	}
-}
-
 // callContext returns funcInfo for the nearest enclosing parent function, not
 // including the node itself, or the enclosing package initializer if the node
 // is at the top level.
 func (ai *logAanalyzer) callContext(stack stackFunc, helper *AstHelper) (string, token.Pos) {
-	//log.Printf("call conext %s", stack(0))
-	//defer log.Printf("done call conext %s", stack(0))
 	for i := 1; ; i++ {
 		switch p := stack(i).(type) {
 		case *ast.FuncDecl:
@@ -151,7 +125,7 @@ func (ai *logAanalyzer) callContext(stack stackFunc, helper *AstHelper) (string,
 			// initializer for top-level expressions in this file of the
 			// package.  We only do this if there are expressions that need
 			// to be initialized.
-			return fmt.Sprintf("<init>@%d", helper.GetPackage()), p.Pos()
+			return fmt.Sprintf("<init>@%p", helper.GetPackage()), p.Pos()
 		}
 	}
 }

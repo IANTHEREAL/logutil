@@ -46,12 +46,12 @@ func Report(storePath string, output string) {
 
 	store := keyvalue.NewLogPatternStore(db)
 
-	reporter, err := log_reporter.NewReporter(store, os.Stdout, "/Users/ianz/Work/go/src/github.com/IANTHEREAL/logutil/reporter/report_test_template.md")
+	reporter, err := log_reporter.NewReporter(store, os.Stdout, "/Users/ianz/Work/go/src/github.com/IANTHEREAL/logutil/reporter/template/report_test_template.md")
 	if err != nil {
 		log.Fatalf("create coverage failed %v", err)
 	}
 
-	err = reporter.Output()
+	err = reporter.Render()
 	if err != nil {
 		log.Fatalf("output coverage failed %v", err)
 	}
